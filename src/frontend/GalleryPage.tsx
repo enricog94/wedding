@@ -17,6 +17,7 @@ type GalleryResponse = {
 };
 
 type WeddingSettingsResponse = {
+  galleryDownloadEnabled: boolean;
   guestUploadsEnabled: boolean;
 };
 
@@ -55,6 +56,7 @@ function GalleryImage({ media, large = false }: { media: GalleryMedia; large?: b
 export function GalleryPage() {
   const [media, setMedia] = useState<GalleryMedia[]>([]);
   const [galleryEnabled, setGalleryEnabled] = useState(true);
+  const [galleryDownloadEnabled, setGalleryDownloadEnabled] = useState(false);
   const [guestUploadsEnabled, setGuestUploadsEnabled] = useState(false);
   const [selected, setSelected] = useState<GalleryMedia | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -85,9 +87,13 @@ export function GalleryPage() {
         if (!response.ok) throw new Error('settings');
         return response.json() as Promise<WeddingSettingsResponse>;
       })
-      .then((settings) => setGuestUploadsEnabled(settings.guestUploadsEnabled === true))
+      .then((settings) => {
+        setGalleryDownloadEnabled(settings.galleryDownloadEnabled === true);
+        setGuestUploadsEnabled(settings.guestUploadsEnabled === true);
+      })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setGalleryDownloadEnabled(false);
           setGuestUploadsEnabled(false);
         }
       });
@@ -170,7 +176,21 @@ export function GalleryPage() {
         }}
       >
         <button type="button" onClick={closeDialog} aria-label="Chiudi immagine">×</button>
-        {selected && <GalleryImage media={selected} large />}
+        {selected && (
+          <div className="gallery-dialog__content">
+            <GalleryImage media={selected} large />
+            {galleryDownloadEnabled && (
+              <a
+                className="gallery-dialog__download"
+                href={`/api/media/${selected.id}/download`}
+                download
+                aria-label="Scarica la foto originale"
+              >
+                Scarica originale
+              </a>
+            )}
+          </div>
+        )}
       </dialog>
     </main>
   );

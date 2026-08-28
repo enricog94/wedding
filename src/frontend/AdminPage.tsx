@@ -36,6 +36,7 @@ type AdminMediaResponse = { media: AdminMedia[]; stats: AdminStats };
 type AdminSettings = {
   galleryEnabled: boolean;
   galleryPreviewEnabled: boolean;
+  galleryDownloadEnabled: boolean;
   guestUploadsEnabled: boolean;
   requireGuestApproval: boolean;
   photoboothAutoApprove: boolean;
@@ -52,6 +53,7 @@ const EMPTY_STATS: AdminStats = {
 const DEFAULT_SETTINGS: AdminSettings = {
   galleryEnabled: true,
   galleryPreviewEnabled: true,
+  galleryDownloadEnabled: true,
   guestUploadsEnabled: true,
   requireGuestApproval: true,
   photoboothAutoApprove: true,
@@ -373,6 +375,7 @@ export function AdminPage() {
           <div className="admin-settings__toggles">
             <SettingsToggle label="Gallery pubblica" description="Rende visibili gallery e media approvati sul sito pubblico." checked={settings.galleryEnabled} disabled={busy || settingsLoading} onChange={(galleryEnabled) => setSettings((current) => ({ ...current, galleryEnabled }))} />
             <SettingsToggle label="Gallery preview Home" description="Mostra nella Home una selezione automatica dei media approvati." checked={settings.galleryPreviewEnabled} disabled={busy || settingsLoading} onChange={(galleryPreviewEnabled) => setSettings((current) => ({ ...current, galleryPreviewEnabled }))} />
+            <SettingsToggle label="Download originali" description="Permetti agli invitati di scaricare le foto originali dalla gallery." checked={settings.galleryDownloadEnabled} disabled={busy || settingsLoading} onChange={(galleryDownloadEnabled) => setSettings((current) => ({ ...current, galleryDownloadEnabled }))} />
             <SettingsToggle label="Upload invitati" description="Consente agli invitati di caricare foto e video dalla pagina Foto." checked={settings.guestUploadsEnabled} disabled={busy || settingsLoading} onChange={(guestUploadsEnabled) => setSettings((current) => ({ ...current, guestUploadsEnabled }))} />
             <SettingsToggle label="Richiedi approvazione upload" description="Se attivo, i contenuti degli invitati devono essere approvati prima di comparire nella gallery." checked={settings.requireGuestApproval} disabled={busy || settingsLoading} onChange={(requireGuestApproval) => setSettings((current) => ({ ...current, requireGuestApproval }))} />
             <SettingsToggle label="Auto-approva Photobooth" description="Predispone l'approvazione automatica dei futuri media provenienti dal Photobooth." checked={settings.photoboothAutoApprove} disabled={busy || settingsLoading} onChange={(photoboothAutoApprove) => setSettings((current) => ({ ...current, photoboothAutoApprove }))} />

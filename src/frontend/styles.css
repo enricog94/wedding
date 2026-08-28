@@ -1288,6 +1288,35 @@ button.gallery-item:hover .gallery-item__image {
   background: var(--color-text);
 }
 
+.gallery-dialog__content {
+  display: grid;
+  justify-items: center;
+  gap: 0.9rem;
+}
+
+.gallery-dialog__content .gallery-dialog__image {
+  max-height: calc(88vh - 4.5rem);
+}
+
+.gallery-dialog__download {
+  min-height: 2.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-paper) 52%, transparent);
+  padding: 0.75rem 1.25rem;
+  color: var(--color-paper);
+  background: color-mix(in srgb, var(--color-text) 68%, transparent);
+  font: 600 0.72rem/1.2 var(--font-body);
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.gallery-dialog__download:hover,
+.gallery-dialog__download:focus-visible {
+  border-color: var(--color-paper);
+  background: color-mix(in srgb, var(--color-text) 88%, transparent);
+}
+
 .admin-page {
   min-height: 100svh;
   padding: calc(var(--header-height) + 2rem) 1rem 5rem;

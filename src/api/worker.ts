@@ -279,6 +279,7 @@ type WeddingSettingsRow = {
   wedding_id: number;
   gallery_enabled: number;
   gallery_preview_enabled: number;
+  gallery_download_enabled: number;
   guest_uploads_enabled: number;
   require_guest_approval: number;
   photobooth_auto_approve: number;
@@ -290,6 +291,7 @@ type WeddingSettingsRow = {
 type WeddingSettings = {
   galleryEnabled: boolean;
   galleryPreviewEnabled: boolean;
+  galleryDownloadEnabled: boolean;
   guestUploadsEnabled: boolean;
   requireGuestApproval: boolean;
   photoboothAutoApprove: boolean;
@@ -389,6 +391,7 @@ async function findCurrentWedding(env: Env): Promise<WeddingRow | null> {
 const DEFAULT_WEDDING_SETTINGS: WeddingSettings = {
   galleryEnabled: true,
   galleryPreviewEnabled: true,
+  galleryDownloadEnabled: true,
   guestUploadsEnabled: true,
   requireGuestApproval: true,
   photoboothAutoApprove: true,
@@ -402,6 +405,7 @@ function serializeWeddingSettings(row: WeddingSettingsRow | null): WeddingSettin
   return {
     galleryEnabled: row.gallery_enabled === 1,
     galleryPreviewEnabled: row.gallery_preview_enabled === 1,
+    galleryDownloadEnabled: row.gallery_download_enabled === 1,
     guestUploadsEnabled: row.guest_uploads_enabled === 1,
     requireGuestApproval: row.require_guest_approval === 1,
     photoboothAutoApprove: row.photobooth_auto_approve === 1,
@@ -413,7 +417,8 @@ function serializeWeddingSettings(row: WeddingSettingsRow | null): WeddingSettin
 
 async function getWeddingSettings(env: Env, weddingId: number): Promise<WeddingSettings> {
   const row = await env.DB.prepare(
-    `SELECT wedding_id, gallery_enabled, gallery_preview_enabled, guest_uploads_enabled,
+    `SELECT wedding_id, gallery_enabled, gallery_preview_enabled, gallery_download_enabled,
+            guest_uploads_enabled,
             require_guest_approval, photobooth_auto_approve,
             schedule_enabled, locations_enabled, info_enabled
      FROM wedding_settings
@@ -452,6 +457,42 @@ function serializeMedia(row: MediaRow) {
     createdAt: row.created_at,
     uploadedAt: row.uploaded_at,
   };
+}
+
+function downloadFilename(media: Pick<MediaRow, 'id' | 'mime_type' | 'original_filename'>): {
+  ascii: string;
+  utf8: string;
+} {
+  const extension = MEDIA_TYPES[media.mime_type as SupportedMimeType]?.extension ?? 'bin';
+  const fallback = `wedding-photo-${media.id}.${extension}`;
+  const forbiddenCharacters = new Set(['\\', '/', ':', '*', '?', '"', '<', '>', '|', ';']);
+  const sanitized = media.original_filename
+    ? Array.from(media.original_filename.normalize('NFC'), (character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return codePoint <= 31 || (codePoint >= 127 && codePoint <= 159) || forbiddenCharacters.has(character)
+          ? '_'
+          : character;
+      }).join('')
+    : undefined;
+  const candidate = sanitized
+    ?.replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .trim()
+    .slice(0, 140);
+  const meaningful = candidate?.replace(/[\s._-]/g, '');
+  const utf8 = candidate && meaningful
+    ? (/\.[a-z0-9]{1,10}$/i.test(candidate) ? candidate : `${candidate}.${extension}`)
+    : fallback;
+  const ascii = utf8
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_');
+  return { ascii: ascii || fallback, utf8 };
+}
+
+function downloadContentDisposition(media: Pick<MediaRow, 'id' | 'mime_type' | 'original_filename'>): string {
+  const filename = downloadFilename(media);
+  return `attachment; filename="${filename.ascii}"; filename*=UTF-8''${encodeRfc3986(filename.utf8)}`;
 }
 
 function adminMediaPayload(row: MediaRow) {
@@ -563,6 +604,7 @@ function parseBooleanSettings(body: unknown): WeddingSettings | null {
   const keys = [
     'galleryEnabled',
     'galleryPreviewEnabled',
+    'galleryDownloadEnabled',
     'guestUploadsEnabled',
     'requireGuestApproval',
     'photoboothAutoApprove',
@@ -574,6 +616,7 @@ function parseBooleanSettings(body: unknown): WeddingSettings | null {
   return {
     galleryEnabled: input.galleryEnabled as boolean,
     galleryPreviewEnabled: input.galleryPreviewEnabled as boolean,
+    galleryDownloadEnabled: input.galleryDownloadEnabled as boolean,
     guestUploadsEnabled: input.guestUploadsEnabled as boolean,
     requireGuestApproval: input.requireGuestApproval as boolean,
     photoboothAutoApprove: input.photoboothAutoApprove as boolean,
@@ -863,6 +906,7 @@ export default {
         return json({
           galleryEnabled: settings.galleryEnabled,
           galleryPreviewEnabled: settings.galleryPreviewEnabled,
+          galleryDownloadEnabled: settings.galleryDownloadEnabled,
           guestUploadsEnabled: settings.guestUploadsEnabled,
         });
       } catch (error) {
@@ -898,13 +942,15 @@ export default {
 
         await env.DB.prepare(
            `INSERT INTO wedding_settings (
-              wedding_id, gallery_enabled, gallery_preview_enabled, guest_uploads_enabled,
+              wedding_id, gallery_enabled, gallery_preview_enabled, gallery_download_enabled,
+              guest_uploads_enabled,
               require_guest_approval, photobooth_auto_approve,
               schedule_enabled, locations_enabled, info_enabled, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(wedding_id) DO UPDATE SET
               gallery_enabled = excluded.gallery_enabled,
               gallery_preview_enabled = excluded.gallery_preview_enabled,
+              gallery_download_enabled = excluded.gallery_download_enabled,
               guest_uploads_enabled = excluded.guest_uploads_enabled,
               require_guest_approval = excluded.require_guest_approval,
               photobooth_auto_approve = excluded.photobooth_auto_approve,
@@ -917,6 +963,7 @@ export default {
             wedding.id,
             Number(settings.galleryEnabled),
             Number(settings.galleryPreviewEnabled),
+            Number(settings.galleryDownloadEnabled),
             Number(settings.guestUploadsEnabled),
             Number(settings.requireGuestApproval),
             Number(settings.photoboothAutoApprove),
@@ -1740,6 +1787,53 @@ export default {
         });
       } catch (error) {
         console.error('Unable to serve gallery media', error);
+        return json({ error: 'Media unavailable' }, 500);
+      }
+    }
+
+    const downloadMedia = url.pathname.match(/^\/api\/media\/([^/]+)\/download$/);
+    if (request.method === 'GET' && downloadMedia) {
+      const mediaId = Number(downloadMedia[1]);
+      if (!Number.isSafeInteger(mediaId) || mediaId <= 0) {
+        return json({ error: 'Media not found' }, 404);
+      }
+
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
+          return json({ error: 'Current wedding is not configured' }, 500);
+        }
+        if (!wedding) return json({ error: 'Media not found' }, 404);
+
+        const settings = await getWeddingSettings(env, wedding.id);
+        if (!settings.galleryEnabled || !settings.galleryDownloadEnabled) {
+          return json({ error: 'Media not found' }, 404);
+        }
+
+        const media = await env.DB.prepare(
+          `SELECT id, original_filename, original_key, mime_type
+           FROM media
+           WHERE id = ? AND wedding_id = ? AND status = 'approved'
+                 AND original_key IS NOT NULL AND original_key != ''
+           LIMIT 1`,
+        )
+          .bind(mediaId, wedding.id)
+          .first<Pick<MediaRow, 'id' | 'original_filename' | 'original_key' | 'mime_type'>>();
+        if (!media) return json({ error: 'Media not found' }, 404);
+
+        const object = await env.MEDIA_BUCKET.get(media.original_key);
+        if (!object) return json({ error: 'Media not found' }, 404);
+
+        return new Response(object.body, {
+          headers: {
+            'content-type': media.mime_type,
+            'content-length': String(object.size),
+            'content-disposition': downloadContentDisposition(media),
+            'cache-control': 'private, no-cache',
+          },
+        });
+      } catch (error) {
+        console.error('Unable to download gallery media', error);
         return json({ error: 'Media unavailable' }, 500);
       }
     }
