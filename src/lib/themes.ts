@@ -1,8 +1,12 @@
 export type ThemeDecoration =
   | 'botanical-orbit'
+  | 'sunflower-orbit'
   | 'summer-botanical'
+  | 'sunflower-flourish'
   | 'botanical-divider'
-  | 'botanical-footer';
+  | 'sunflower-divider'
+  | 'botanical-footer'
+  | 'sunflower-footer';
 
 export type WeddingTheme = {
   id: string;
@@ -15,6 +19,7 @@ export type WeddingTheme = {
     primary: string;
     secondary: string;
     accent: string;
+    accentSubtle?: string;
     border: string;
     tintedSurface: string;
     error: string;
@@ -44,23 +49,24 @@ export const botanicalSageTheme: WeddingTheme = {
     muted: '#67685f',
     primary: '#66705a',
     secondary: '#aab29c',
-    accent: '#b7a58d',
-    border: 'rgba(102, 112, 90, 0.24)',
-    tintedSurface: '#e7eadf',
+    accent: '#c9b897',
+    accentSubtle: '#d8c5a2',
+    border: 'rgba(102, 112, 90, 0.20)',
+    tintedSurface: '#e8ebe1',
     error: '#854c40',
   },
   fonts: {
     decorative: "'Style Script', cursive",
     display: "'Cormorant Garamond', Georgia, serif",
     body: "'Inter', Arial, sans-serif",
-    stylesheetUrl: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600&family=Style+Script&display=swap',
+    stylesheetUrl: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=Style+Script&display=swap',
   },
   decorations: {
-    hero: 'botanical-orbit',
-    cornerTop: 'summer-botanical',
-    cornerBottom: 'summer-botanical',
-    divider: 'botanical-divider',
-    footer: 'botanical-footer',
+    hero: 'sunflower-orbit',
+    cornerTop: 'sunflower-flourish',
+    cornerBottom: 'sunflower-flourish',
+    divider: 'sunflower-divider',
+    footer: 'sunflower-footer',
   },
 };
 
@@ -89,6 +95,7 @@ export function applyWeddingTheme(theme: WeddingTheme): void {
     '--color-primary': theme.colors.primary,
     '--color-secondary': theme.colors.secondary,
     '--color-accent': theme.colors.accent,
+    '--color-accent-subtle': theme.colors.accentSubtle || theme.colors.accent,
     '--color-border': theme.colors.border,
     '--color-tinted-surface': theme.colors.tintedSurface,
     '--color-error': theme.colors.error,
@@ -115,3 +122,4 @@ export function applyWeddingTheme(theme: WeddingTheme): void {
     fontStylesheet.href = theme.fonts.stylesheetUrl;
   }
 }
+
