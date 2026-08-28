@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef, ReactNode } from 'react';
 import { Countdown } from '../components/Countdown';
-import { EditorialPhotoSection } from '../components/EditorialPhotoSection';
 import { LocationCard } from '../components/LocationCard';
 import { Navigation } from '../components/Navigation';
 import { Section } from '../components/Section';
@@ -12,6 +11,23 @@ import { applyWeddingTheme, getWeddingTheme } from '../lib/themes';
 import { AdminPage } from './AdminPage';
 import { GalleryPage } from './GalleryPage';
 import { PhotoPage } from './PhotoPage';
+
+function FadeIn({ children, delay = 0, className = '' }: { children: ReactNode; delay?: number; className?: string }) {
+  const [isVisible, setIsVisible] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setIsVisible(true);
+    }, { threshold: 0.15 });
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={`fade-in-wrap ${isVisible ? 'is-visible' : ''} ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+      {children}
+    </div>
+  );
+}
 
 const italianMonths = [
   'gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno',
@@ -77,16 +93,27 @@ export function App() {
       />
       {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminPage /> : <main>
         <div className="hero-viewport">
-          <section id="home" className="hero" aria-labelledby="wedding-title">
-            <ThemeDecoration theme={theme} slot="hero" />
-            <ThemeDecoration theme={theme} slot="cornerBottom" />
-            <ThemeDecoration theme={theme} slot="cornerTop" />
-            <div className="hero__content">
-              {wedding.heroEyebrow && <p className="script-detail">{wedding.heroEyebrow}</p>}
+          <section id="home" className="hero hero--photo" aria-labelledby="wedding-title">
+            <img
+              className="hero-photo__image"
+              src="/images/serena-enrico-editorial.jpg"
+              alt={`${wedding.brideName} ed ${wedding.groomName} sorridono con i volti vicini tra gli alberi`}
+              width="2993"
+              height="1995"
+              decoding="async"
+              fetchPriority="high"
+            />
+            <div className="hero-photo__overlay" aria-hidden="true" />
+            <div className="hero__content hero-photo__content">
+              <p className="script-detail">{wedding.heroEyebrow || 'Ci sposiamo'}</p>
               {wedding.heroTitle ? (
-                <h1 id="wedding-title">{wedding.heroTitle}</h1>
+                <h1 id="wedding-title" className="hero-photo__title hero-photo__title--custom">{wedding.heroTitle}</h1>
               ) : (
-                <h1 id="wedding-title">{wedding.brideName} <span>&amp;</span> {wedding.groomName}</h1>
+                <h1 id="wedding-title" className="hero-photo__title">
+                  <span className="hero-photo__name">{wedding.brideName}</span>
+                  <span className="hero-photo__ampersand">&amp;</span>
+                  <span className="hero-photo__name">{wedding.groomName}</span>
+                </h1>
               )}
               {wedding.heroSubtitle && <p className="hero__subtitle">{wedding.heroSubtitle}</p>}
               <p className="hero__date">{date.day} <span>·</span> {date.month} <span>·</span> {date.year}</p>
@@ -105,15 +132,32 @@ export function App() {
           </section>
         </div>
 
-        <EditorialPhotoSection />
+        {/* M5.7: NOI / LA NOSTRA STORIA */}
+        <Section id="noi" tone="paper" className="story-section">
+          <SectionTitle eyebrow="Noi" title="La nostra storia" align="center" />
+          <div className="story-grid">
+            <FadeIn delay={100} className="story-text">
+              <h3>Come è iniziata</h3>
+              <p>Un breve racconto su come ci siamo incontrati, le prime uscite, i momenti in cui abbiamo capito di voler costruire qualcosa di grande insieme. Questo è un testo placeholder che lascerà spazio alle vostre vere emozioni.</p>
+
+              <h3 className="story-text--mt">La proposta</h3>
+              <p>Il racconto del momento in cui tutto è cambiato. Le parole dette, l'emozione, il "Sì" che ci ha portato a organizzare questa giornata meravigliosa che vogliamo condividere con voi.</p>
+            </FadeIn>
+            <FadeIn delay={300} className="story-image">
+              <div className="story-image__placeholder"></div>
+            </FadeIn>
+          </div>
+        </Section>
 
         {showSchedule && (
           <Section id="programma" tone="paper" className="program-section">
             <div className="section-layout">
               <SectionTitle eyebrow="La giornata" title="Programma" />
               <ol className="timeline" aria-label="Programma del matrimonio">
-                {schedule.map((item) => (
-                  <TimelineItem key={item.id} time={item.timeLabel} title={item.title} place={item.subtitle} description={item.description} />
+                {schedule.map((item, i) => (
+                  <FadeIn key={item.id} delay={i * 150}>
+                    <TimelineItem time={item.timeLabel} title={item.title} place={item.subtitle} description={item.description} />
+                  </FadeIn>
                 ))}
               </ol>
             </div>
@@ -123,17 +167,21 @@ export function App() {
         {showLocations && (
           <Section id="location" tone="ivory" className="location-section">
             <SectionTitle eyebrow="I luoghi" title="Location" align="center" />
-            <div className="location-grid">
+            <div className="location-grid location-grid--editorial">
               {locations.map((location, index) => (
-                <LocationCard
-                  key={location.id}
-                  number={String(index + 1).padStart(2, '0')}
-                  kind={location.type}
-                  name={location.name}
-                  address={location.address}
-                  mapsUrl={location.mapsUrl}
-                  description={location.description}
-                />
+                <FadeIn key={location.id} delay={index * 150} className="location-editorial">
+                  <div className="location-editorial__image-placeholder"></div>
+                  <div className="location-editorial__content">
+                    <LocationCard
+                      number={String(index + 1).padStart(2, '0')}
+                      kind={location.type}
+                      name={location.name}
+                      address={location.address}
+                      mapsUrl={location.mapsUrl}
+                      description={location.description}
+                    />
+                  </div>
+                </FadeIn>
               ))}
             </div>
           </Section>
@@ -144,16 +192,43 @@ export function App() {
             <div className="section-layout section-layout--info">
               <SectionTitle eyebrow="Da sapere" title="Info utili" />
               <div className="info-list">
-                {info.map((item) => (
-                  <article className="info-item" key={item.id}>
-                    <h3>{item.title}</h3>
-                    {item.content && <p>{item.content}</p>}
-                  </article>
+                {info.map((item, i) => (
+                  <FadeIn key={item.id} delay={i * 100}>
+                    <article className="info-item">
+                      <h3>{item.title}</h3>
+                      {item.content && <p>{item.content}</p>}
+                    </article>
+                  </FadeIn>
                 ))}
               </div>
             </div>
           </Section>
         )}
+
+        {/* M5.7: FOTO INVITATI */}
+        <Section id="contributi" tone="paper" className="guest-photos-section">
+          <FadeIn className="guest-photos-content">
+            <SectionTitle eyebrow="Il vostro sguardo" title="Il matrimonio visto da voi" align="center" />
+            <p className="guest-photos__desc">Aiutateci a raccogliere i momenti più belli della giornata attraverso i vostri occhi.</p>
+            <a href="/foto" className="button button--solid">Condividi le tue foto</a>
+          </FadeIn>
+        </Section>
+
+        {/* M5.7: GALLERY PREVIEW */}
+        <Section id="gallery-preview" tone="ivory" className="gallery-preview-section">
+          <FadeIn>
+            <SectionTitle eyebrow="Ricordi" title="Gallery" align="center" />
+            <div className="gallery-preview-grid">
+              <div className="gp-img gp-img--1"></div>
+              <div className="gp-img gp-img--2"></div>
+              <div className="gp-img gp-img--3"></div>
+              <div className="gp-img gp-img--4"></div>
+            </div>
+            <div className="gallery-preview__action">
+              <a href="/gallery" className="button">Vedi tutte le foto</a>
+            </div>
+          </FadeIn>
+        </Section>
       </main>}
       <footer className="site-footer">
         <ThemeDecoration theme={theme} slot="footer" />

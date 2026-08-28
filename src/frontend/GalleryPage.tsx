@@ -16,6 +16,10 @@ type GalleryResponse = {
   media: GalleryMedia[];
 };
 
+type WeddingSettingsResponse = {
+  guestUploadsEnabled: boolean;
+};
+
 const heicTypes = new Set(['image/heic', 'image/heif']);
 
 function MediaPlaceholder({ kind }: { kind: 'heic' | 'video' | 'unavailable' }) {
@@ -51,6 +55,7 @@ function GalleryImage({ media, large = false }: { media: GalleryMedia; large?: b
 export function GalleryPage() {
   const [media, setMedia] = useState<GalleryMedia[]>([]);
   const [galleryEnabled, setGalleryEnabled] = useState(true);
+  const [guestUploadsEnabled, setGuestUploadsEnabled] = useState(false);
   const [selected, setSelected] = useState<GalleryMedia | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -69,6 +74,22 @@ export function GalleryPage() {
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) setStatus('error');
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/wedding/settings', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('settings');
+        return response.json() as Promise<WeddingSettingsResponse>;
+      })
+      .then((settings) => setGuestUploadsEnabled(settings.guestUploadsEnabled === true))
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setGuestUploadsEnabled(false);
+        }
       });
     return () => controller.abort();
   }, []);
@@ -131,6 +152,12 @@ export function GalleryPage() {
             );
           })}
         </section>
+      )}
+
+      {galleryEnabled && guestUploadsEnabled && !selected && (
+        <a className="gallery-fab" href="/foto" aria-label="Aggiungi foto o video">
+          <span aria-hidden="true">+</span>
+        </a>
       )}
 
       <dialog

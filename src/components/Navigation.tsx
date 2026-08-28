@@ -18,8 +18,6 @@ export function Navigation({ brideName, groomName, sections }: NavigationProps) 
     { href: '/#home', label: 'Home', visible: true },
     { href: '/#programma', label: 'Programma', visible: sections?.schedule !== false },
     { href: '/#location', label: 'Location', visible: sections?.locations !== false },
-    { href: '/#info', label: 'Info', visible: sections?.info !== false },
-    { href: '/foto', label: 'Foto', visible: true },
     { href: '/gallery', label: 'Gallery', visible: true },
   ].filter((link) => link.visible);
 
