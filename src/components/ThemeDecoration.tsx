@@ -11,60 +11,84 @@ function decorationContent(decoration: Decoration) {
   if (decoration === 'sunflower-orbit') {
     return (
       <svg className="sunflower-orbit-svg" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="250" cy="250" r="240" stroke="currentColor" strokeWidth="1" strokeDasharray="4 4" opacity="0.4" />
-        <circle cx="250" cy="250" r="248" stroke="currentColor" strokeWidth="0.75" opacity="0.75" />
-        {/* Accent Sunflower Line Art motif at orbit top */}
-        <g transform="translate(250, 2) scale(0.7)" stroke="currentColor" strokeWidth="1" strokeLinecap="round">
-          {/* Sunflower Head Center */}
-          <circle cx="0" cy="0" r="7" fill="var(--color-paper)" stroke="currentColor" />
-          <circle cx="0" cy="0" r="3" stroke="var(--color-accent-subtle)" strokeWidth="0.8" fill="none" />
-          {/* Elongated Petals */}
+        <circle cx="250" cy="250" r="238" stroke="currentColor" strokeWidth="0.8" strokeDasharray="3 6" opacity="0.35" />
+        <circle cx="250" cy="250" r="246" stroke="currentColor" strokeWidth="0.7" opacity="0.65" />
+        {/* Refined Sunflower Line Art motif at orbit top */}
+        <g transform="translate(250, 4) scale(0.72)" strokeLinecap="round">
+          {/* Seed core */}
+          <circle cx="0" cy="0" r="9" fill="var(--color-paper)" stroke="currentColor" strokeWidth="1" />
+          <circle cx="0" cy="0" r="5" stroke="var(--color-accent-subtle)" strokeWidth="0.75" fill="none" strokeDasharray="1.5 2.5" />
+          <circle cx="0" cy="0" r="2" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="var(--color-accent-subtle)" opacity="0.7" />
+          {/* Organic Double Layer Petals */}
           {Array.from({ length: 16 }, (_, i) => {
             const angle = (i * 360) / 16;
             return (
-              <path
-                key={i}
-                d="M 0 -7 C -2.5 -14, 0 -22, 0 -22 C 0 -22, 2.5 -14, 0 -7"
-                transform={`rotate(${angle})`}
-                stroke="var(--color-accent-subtle)"
-                strokeWidth="0.9"
-                fill="none"
-              />
+              <g key={i} transform={`rotate(${angle})`}>
+                <path
+                  d="M 0 -9 C -4 -16, -1 -25, 0 -26 C 1 -25, 4 -16, 0 -9 Z"
+                  stroke="var(--color-accent-subtle)"
+                  strokeWidth="0.85"
+                  fill="none"
+                />
+                <path
+                  d="M 0 -9 L 0 -22"
+                  stroke="var(--color-accent-subtle)"
+                  strokeWidth="0.5"
+                  opacity="0.6"
+                />
+              </g>
             );
           })}
         </g>
-        {/* Side leaves along orbit */}
-        <path d="M 12 250 Q -15 220 8 190 Q 20 220 12 250 Z" fill="none" stroke="currentColor" strokeWidth="0.8" opacity="0.6" />
-        <path d="M 488 250 Q 515 280 492 310 Q 480 280 488 250 Z" fill="none" stroke="currentColor" strokeWidth="0.8" opacity="0.6" />
+        {/* Soft Organic Leaves along orbit sides */}
+        <g opacity="0.65" stroke="currentColor">
+          <path d="M 12 250 C -12 225, -2 195, 14 185 C 10 210, 24 235, 12 250 Z" fill="none" strokeWidth="0.75" />
+          <path d="M 12 250 C 0 225, 4 205, 14 185" strokeWidth="0.5" opacity="0.6" />
+          <path d="M 488 250 C 512 275, 502 305, 486 315 C 490 290, 476 265, 488 250 Z" fill="none" strokeWidth="0.75" />
+          <path d="M 488 250 C 500 275, 496 295, 486 315" strokeWidth="0.5" opacity="0.6" />
+        </g>
       </svg>
     );
   }
 
   if (decoration === 'sunflower-flourish') {
     return (
-      <svg className="sunflower-flourish-svg" viewBox="0 0 200 320" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        {/* Organic Stem */}
-        <path d="M 100 320 C 90 220, 140 140, 110 20" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
-        <path d="M 110 20 C 105 5, 85 0, 75 15" stroke="currentColor" strokeWidth="0.8" strokeLinecap="round" />
-        {/* Leaves */}
-        <path d="M 98 250 C 60 240, 30 210, 45 190 C 70 200, 92 230, 98 250 Z" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.9" />
-        <path d="M 112 180 C 150 165, 175 135, 160 115 C 135 130, 115 160, 112 180 Z" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.9" />
-        <path d="M 106 110 C 70 95, 55 70, 70 55 C 88 70, 100 95, 106 110 Z" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.8" />
-        {/* Reinterpreted Line Art Sunflower Blossom */}
-        <g transform="translate(110, 20) rotate(-15)" strokeLinecap="round">
-          <circle cx="0" cy="0" r="12" fill="var(--color-paper)" stroke="currentColor" strokeWidth="1.2" />
-          <circle cx="0" cy="0" r="7" stroke="var(--color-accent-subtle)" strokeWidth="0.9" fill="none" strokeDasharray="2 2" />
+      <svg className="sunflower-flourish-svg" viewBox="0 0 220 340" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        {/* Organic Stem Spline */}
+        <path d="M 110 340 C 95 240, 155 150, 120 28" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
+        <path d="M 120 28 C 115 12, 95 8, 85 22" stroke="currentColor" strokeWidth="0.7" strokeLinecap="round" opacity="0.7" />
+        {/* Organic Leaves with Central Veins */}
+        <g stroke="currentColor">
+          <path d="M 102 265 C 55 255, 25 218, 42 196 C 70 208, 94 240, 102 265 Z" fill="var(--color-paper)" strokeWidth="0.85" />
+          <path d="M 102 265 C 72 245, 52 225, 42 196" strokeWidth="0.5" opacity="0.65" />
+
+          <path d="M 118 190 C 162 175, 192 140, 172 118 C 145 134, 122 168, 118 190 Z" fill="var(--color-paper)" strokeWidth="0.85" />
+          <path d="M 118 190 C 148 168, 165 146, 172 118" strokeWidth="0.5" opacity="0.65" />
+
+          <path d="M 112 115 C 72 98, 55 72, 72 56 C 92 72, 105 98, 112 115 Z" fill="var(--color-paper)" strokeWidth="0.75" />
+        </g>
+        {/* Line Art Sunflower Blossom */}
+        <g transform="translate(120, 28) rotate(-12)" strokeLinecap="round">
+          <circle cx="0" cy="0" r="13" fill="var(--color-paper)" stroke="currentColor" strokeWidth="1" />
+          <circle cx="0" cy="0" r="8" stroke="var(--color-accent-subtle)" strokeWidth="0.75" fill="none" strokeDasharray="2 2" />
+          <circle cx="0" cy="0" r="3" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="var(--color-accent-subtle)" opacity="0.5" />
           {Array.from({ length: 18 }, (_, i) => {
             const angle = (i * 360) / 18;
             return (
-              <path
-                key={i}
-                d="M 0 -12 C -4 -24, 0 -36, 0 -36 C 0 -36, 4 -24, 0 -12"
-                transform={`rotate(${angle})`}
-                stroke="var(--color-accent-subtle)"
-                strokeWidth="1"
-                fill="none"
-              />
+              <g key={i} transform={`rotate(${angle})`}>
+                <path
+                  d="M 0 -13 C -4.5 -24, -1 -37, 0 -38 C 1 -37, 4.5 -24, 0 -13 Z"
+                  stroke="var(--color-accent-subtle)"
+                  strokeWidth="0.9"
+                  fill="none"
+                />
+                <path
+                  d="M 0 -13 L 0 -30"
+                  stroke="var(--color-accent-subtle)"
+                  strokeWidth="0.45"
+                  opacity="0.55"
+                />
+              </g>
             );
           })}
         </g>
@@ -74,29 +98,27 @@ function decorationContent(decoration: Decoration) {
 
   if (decoration === 'sunflower-divider') {
     return (
-      <svg className="sunflower-divider-svg" viewBox="0 0 240 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <line x1="0" y1="12" x2="95" y2="12" stroke="currentColor" strokeWidth="0.75" />
-        <line x1="145" y1="12" x2="240" y2="12" stroke="currentColor" strokeWidth="0.75" />
-        {/* Center Sunflower Line Art Motif */}
-        <g transform="translate(120, 12)">
-          <circle cx="0" cy="0" r="4" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.9" />
-          <circle cx="0" cy="0" r="2" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="none" />
+      <svg className="sunflower-divider-svg" viewBox="0 0 260 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <line x1="0" y1="14" x2="105" y2="14" stroke="currentColor" strokeWidth="0.7" opacity="0.8" />
+        <line x1="155" y1="14" x2="260" y2="14" stroke="currentColor" strokeWidth="0.7" opacity="0.8" />
+        <g transform="translate(130, 14)" strokeLinecap="round">
+          <circle cx="0" cy="0" r="5" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.85" />
+          <circle cx="0" cy="0" r="2.5" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="none" />
           {Array.from({ length: 12 }, (_, i) => {
             const angle = (i * 360) / 12;
             return (
               <path
                 key={i}
-                d="M 0 -4 C -1.5 -7, 0 -10, 0 -10 C 0 -10, 1.5 -7, 0 -4"
+                d="M 0 -5 C -2 -8, 0 -12, 0 -12 C 0 -12, 2 -8, 0 -5 Z"
                 transform={`rotate(${angle})`}
                 stroke="var(--color-accent-subtle)"
-                strokeWidth="0.8"
+                strokeWidth="0.75"
                 fill="none"
               />
             );
           })}
-          {/* Leaves flanking */}
-          <path d="M -10 0 C -15 -4, -20 -1, -22 0 C -20 1, -15 4, -10 0 Z" fill="none" stroke="currentColor" strokeWidth="0.75" />
-          <path d="M 10 0 C 15 -4, 20 -1, 22 0 C 20 1, 15 4, 10 0 Z" fill="none" stroke="currentColor" strokeWidth="0.75" />
+          <path d="M -12 0 C -18 -5, -24 -1, -26 0 C -24 1, -18 5, -12 0 Z" fill="none" stroke="currentColor" strokeWidth="0.7" />
+          <path d="M 12 0 C 18 -5, 24 -1, 26 0 C 24 1, 18 5, 12 0 Z" fill="none" stroke="currentColor" strokeWidth="0.7" />
         </g>
       </svg>
     );
@@ -104,20 +126,21 @@ function decorationContent(decoration: Decoration) {
 
   if (decoration === 'sunflower-footer') {
     return (
-      <svg className="sunflower-footer-svg" viewBox="0 0 160 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M 10 20 Q 50 35 70 20" stroke="currentColor" strokeWidth="0.8" />
-        <path d="M 150 20 Q 110 35 90 20" stroke="currentColor" strokeWidth="0.8" />
-        <g transform="translate(80, 20)">
-          <circle cx="0" cy="0" r="5" fill="none" stroke="var(--color-accent-subtle)" strokeWidth="1" />
+      <svg className="sunflower-footer-svg" viewBox="0 0 180 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M 10 22 Q 55 38 78 22" stroke="currentColor" strokeWidth="0.75" opacity="0.8" />
+        <path d="M 170 22 Q 125 38 102 22" stroke="currentColor" strokeWidth="0.75" opacity="0.8" />
+        <g transform="translate(90, 22)" strokeLinecap="round">
+          <circle cx="0" cy="0" r="6" fill="none" stroke="var(--color-accent-subtle)" strokeWidth="0.9" />
+          <circle cx="0" cy="0" r="2.5" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="none" />
           {Array.from({ length: 12 }, (_, i) => {
             const angle = (i * 360) / 12;
             return (
               <path
                 key={i}
-                d="M 0 -5 C -2 -9, 0 -13, 0 -13 C 0 -13, 2 -9, 0 -5"
+                d="M 0 -6 C -2.5 -10, 0 -14, 0 -14 C 0 -14, 2.5 -10, 0 -6 Z"
                 transform={`rotate(${angle})`}
                 stroke="var(--color-accent-subtle)"
-                strokeWidth="0.8"
+                strokeWidth="0.75"
                 fill="none"
               />
             );

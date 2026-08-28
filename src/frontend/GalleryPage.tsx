@@ -98,7 +98,7 @@ export function GalleryPage() {
       )}
 
       {galleryEnabled && media.length > 0 && (
-        <section className="gallery-grid" aria-label="Gallery fotografica">
+        <section className="gallery-grid" data-count={media.length} aria-label="Gallery fotografica">
           {media.map((item) => {
             if (
               item.mimeType.startsWith('image/')
