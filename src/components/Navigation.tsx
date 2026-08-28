@@ -23,9 +23,22 @@ export function Navigation({ brideName, groomName, sections }: NavigationProps) 
     { href: '/gallery', label: 'Gallery', visible: true },
   ].filter((link) => link.visible);
 
+  const toggleMenu = () => {
+    setIsOpen((open) => {
+      const next = !open;
+      document.body.dataset.navOpen = String(next);
+      return next;
+    });
+  };
+
+  const closeMenu = () => {
+    setIsOpen(false);
+    document.body.dataset.navOpen = 'false';
+  };
+
   return (
     <header className="site-header">
-      <a className="site-mark" href="/#home" aria-label={`${brideName} e ${groomName}, torna alla Home`}>
+      <a className="site-mark" href="/#home" onClick={closeMenu} aria-label={`${brideName} e ${groomName}, torna alla Home`}>
         {brideInitial} <span>&amp;</span> {groomInitial}
       </a>
       <button
@@ -33,17 +46,23 @@ export function Navigation({ brideName, groomName, sections }: NavigationProps) 
         type="button"
         aria-expanded={isOpen}
         aria-controls="site-navigation"
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={toggleMenu}
       >
-        <span className="menu-toggle__label">Menu</span>
+        <span className="menu-toggle__label">{isOpen ? 'Chiudi' : 'Menu'}</span>
         <span className="menu-toggle__icon" aria-hidden="true"><i /><i /></span>
       </button>
       <nav id="site-navigation" className="site-nav" data-open={isOpen} aria-label="Navigazione principale">
-        {links.map((link) => (
-          <a key={link.href} href={link.href} onClick={() => setIsOpen(false)}>
-            {link.label}
-          </a>
-        ))}
+        <div className="site-nav__links">
+          {links.map((link) => (
+            <a key={link.href} href={link.href} onClick={closeMenu}>
+              {link.label}
+            </a>
+          ))}
+        </div>
+        <div className="site-nav__footer">
+          <p className="site-nav__names">{brideName} &amp; {groomName}</p>
+          <p className="site-nav__date">24 · 07 · 2027</p>
+        </div>
       </nav>
     </header>
   );

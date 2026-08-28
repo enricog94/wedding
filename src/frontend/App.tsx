@@ -75,27 +75,34 @@ export function App() {
         sections={{ schedule: showSchedule, locations: showLocations, info: showInfo }}
       />
       {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminPage /> : <main>
-        <section id="home" className="hero" aria-labelledby="wedding-title">
-          <ThemeDecoration theme={theme} slot="hero" />
-          <ThemeDecoration theme={theme} slot="cornerBottom" />
-          <ThemeDecoration theme={theme} slot="cornerTop" />
-          <div className="hero__content">
-            {wedding.heroEyebrow && <p className="script-detail">{wedding.heroEyebrow}</p>}
-            {wedding.heroTitle ? (
-              <h1 id="wedding-title">{wedding.heroTitle}</h1>
-            ) : (
-              <h1 id="wedding-title">{wedding.brideName} <span>&amp;</span> {wedding.groomName}</h1>
+        <div className="hero-viewport">
+          <section id="home" className="hero" aria-labelledby="wedding-title">
+            <ThemeDecoration theme={theme} slot="hero" />
+            <ThemeDecoration theme={theme} slot="cornerBottom" />
+            <ThemeDecoration theme={theme} slot="cornerTop" />
+            <div className="hero__content">
+              {wedding.heroEyebrow && <p className="script-detail">{wedding.heroEyebrow}</p>}
+              {wedding.heroTitle ? (
+                <h1 id="wedding-title">{wedding.heroTitle}</h1>
+              ) : (
+                <h1 id="wedding-title">{wedding.brideName} <span>&amp;</span> {wedding.groomName}</h1>
+              )}
+              {wedding.heroSubtitle && <p className="hero__subtitle">{wedding.heroSubtitle}</p>}
+              <p className="hero__date">{date.day} <span>·</span> {date.month} <span>·</span> {date.year}</p>
+            </div>
+            {firstPublicSection && (
+              <a className="scroll-cue" href={firstPublicSection}>
+                Scopri <span aria-hidden="true">↓</span>
+              </a>
             )}
-            {wedding.heroSubtitle && <p className="hero__subtitle">{wedding.heroSubtitle}</p>}
-            <p className="hero__date">{date.day} <span>·</span> {date.month} <span>·</span> {date.year}</p>
-            <Countdown key={wedding.weddingDate} target={target} />
-          </div>
-          {firstPublicSection && (
-            <a className="scroll-cue" href={firstPublicSection}>
-              Scopri <span aria-hidden="true">↓</span>
-            </a>
-          )}
-        </section>
+          </section>
+
+          <section className="countdown-strip" aria-label="Conto alla rovescia al matrimonio">
+            <div className="countdown-strip__container">
+              <Countdown key={wedding.weddingDate} target={target} />
+            </div>
+          </section>
+        </div>
 
         {showSchedule && (
           <Section id="programma" tone="paper" className="program-section">

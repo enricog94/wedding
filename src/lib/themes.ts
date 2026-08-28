@@ -1,6 +1,7 @@
 export type ThemeDecoration =
   | 'botanical-orbit'
   | 'sunflower-orbit'
+  | 'sunflower-arc'
   | 'summer-botanical'
   | 'sunflower-flourish'
   | 'botanical-divider'
@@ -62,7 +63,7 @@ export const botanicalSageTheme: WeddingTheme = {
     stylesheetUrl: 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=Style+Script&display=swap',
   },
   decorations: {
-    hero: 'sunflower-orbit',
+    hero: 'sunflower-arc',
     cornerTop: 'sunflower-flourish',
     cornerBottom: 'sunflower-flourish',
     divider: 'sunflower-divider',

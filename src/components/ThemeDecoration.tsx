@@ -8,45 +8,36 @@ type ThemeDecorationProps = {
 };
 
 function decorationContent(decoration: Decoration) {
-  if (decoration === 'sunflower-orbit') {
+  if (decoration === 'sunflower-arc' || decoration === 'sunflower-orbit') {
     return (
-      <svg className="sunflower-orbit-svg" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="250" cy="250" r="238" stroke="currentColor" strokeWidth="0.8" strokeDasharray="3 6" opacity="0.35" />
-        <circle cx="250" cy="250" r="246" stroke="currentColor" strokeWidth="0.7" opacity="0.65" />
-        {/* Refined Sunflower Line Art motif at orbit top */}
-        <g transform="translate(250, 4) scale(0.72)" strokeLinecap="round">
-          {/* Seed core */}
-          <circle cx="0" cy="0" r="9" fill="var(--color-paper)" stroke="currentColor" strokeWidth="1" />
-          <circle cx="0" cy="0" r="5" stroke="var(--color-accent-subtle)" strokeWidth="0.75" fill="none" strokeDasharray="1.5 2.5" />
-          <circle cx="0" cy="0" r="2" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="var(--color-accent-subtle)" opacity="0.7" />
-          {/* Organic Double Layer Petals */}
-          {Array.from({ length: 16 }, (_, i) => {
-            const angle = (i * 360) / 16;
+      <svg className="sunflower-arc-svg" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        {/* Asymmetrical loose upper sweeping arc */}
+        <path d="M 50 220 C 90 110, 210 60, 340 85" stroke="currentColor" strokeWidth="0.75" opacity="0.32" strokeDasharray="5 5" />
+        <path d="M 80 240 C 115 140, 215 95, 310 115" stroke="currentColor" strokeWidth="0.5" opacity="0.22" />
+        {/* Asymmetrical loose lower counter arc - shorter and offset */}
+        <path d="M 230 435 C 335 425, 420 360, 435 240" stroke="currentColor" strokeWidth="0.75" opacity="0.3" strokeDasharray="10 5" />
+        <path d="M 270 410 C 350 400, 405 345, 415 260" stroke="currentColor" strokeWidth="0.5" opacity="0.2" />
+        {/* Subtle Line Art Sunflower motif at upper arc tip */}
+        <g transform="translate(340, 85) scale(0.6)" strokeLinecap="round">
+          <circle cx="0" cy="0" r="7" fill="var(--color-paper)" stroke="currentColor" strokeWidth="0.85" />
+          <circle cx="0" cy="0" r="3.5" stroke="var(--color-accent-subtle)" strokeWidth="0.6" fill="none" strokeDasharray="1.5 1.5" />
+          {Array.from({ length: 12 }, (_, i) => {
+            const angle = (i * 360) / 12;
             return (
               <g key={i} transform={`rotate(${angle})`}>
                 <path
-                  d="M 0 -9 C -4 -16, -1 -25, 0 -26 C 1 -25, 4 -16, 0 -9 Z"
+                  d="M 0 -7 C -3 -12, -1 -19, 0 -20 C 1 -19, 3 -12, 0 -7 Z"
                   stroke="var(--color-accent-subtle)"
-                  strokeWidth="0.85"
+                  strokeWidth="0.7"
                   fill="none"
-                />
-                <path
-                  d="M 0 -9 L 0 -22"
-                  stroke="var(--color-accent-subtle)"
-                  strokeWidth="0.5"
-                  opacity="0.6"
                 />
               </g>
             );
           })}
         </g>
-        {/* Soft Organic Leaves along orbit sides */}
-        <g opacity="0.65" stroke="currentColor">
-          <path d="M 12 250 C -12 225, -2 195, 14 185 C 10 210, 24 235, 12 250 Z" fill="none" strokeWidth="0.75" />
-          <path d="M 12 250 C 0 225, 4 205, 14 185" strokeWidth="0.5" opacity="0.6" />
-          <path d="M 488 250 C 512 275, 502 305, 486 315 C 490 290, 476 265, 488 250 Z" fill="none" strokeWidth="0.75" />
-          <path d="M 488 250 C 500 275, 496 295, 486 315" strokeWidth="0.5" opacity="0.6" />
-        </g>
+        {/* Fine organic connecting line accents */}
+        <path d="M 40 210 Q 75 190, 100 215" stroke="currentColor" strokeWidth="0.6" opacity="0.35" fill="none" />
+        <path d="M 445 250 Q 420 280, 395 260" stroke="currentColor" strokeWidth="0.6" opacity="0.35" fill="none" />
       </svg>
     );
   }
