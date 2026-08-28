@@ -1,6 +1,8 @@
 # Serena & Enrico — Wedding website
 
-Skeleton full-stack della milestone M0 per il matrimonio di Serena ed Enrico. Il progetto usa un unico Cloudflare Worker: React/Vite genera il frontend statico, mentre lo stesso deployment gestisce le route `/api/*`, D1 e R2.
+Sito full-stack del matrimonio di Serena ed Enrico, aggiornato alla milestone M1. Il progetto usa un unico Cloudflare Worker: React/Vite genera il frontend statico, mentre lo stesso deployment gestisce le route `/api/*`, D1 e R2.
+
+M1 include Home, countdown, programma, location, informazioni utili e navigazione responsive. Il design system mobile-first usa Style Script, Cormorant Garamond e Inter, con palette avorio, salvia, oliva e champagne.
 
 ## Architettura
 
@@ -14,6 +16,10 @@ Endpoint disponibili:
 
 - `GET /api/health` → `{ "status": "ok" }`
 - `GET /api/config` → legge `wedding_date` da D1
+- `GET /api/wedding/current` → restituisce il matrimonio attivo
+- `GET /api/weddings/:slug` → restituisce il matrimonio associato allo slug
+
+Il matrimonio mostrato dalla Home e restituito da `/api/wedding/current` è selezionato esplicitamente dalla variabile Worker non sensibile `CURRENT_WEDDING_SLUG`, configurata in `wrangler.jsonc`.
 
 ## Requisiti
 
@@ -79,11 +85,11 @@ Il progetto è collegato al database D1 remoto esistente `wedding-db`. Per appli
 npm run db:migrate:remote
 ```
 
-La migration `migrations/0001_initial.sql` crea soltanto `app_config` e inserisce `wedding_date = 2027-07-24`.
+La migration `migrations/0001_initial.sql` crea `app_config` e inserisce `wedding_date = 2027-07-24`; resta disponibile per compatibilità M0/M1. La migration `migrations/0002_weddings.sql` introduce il modello wedding predisposto al futuro supporto multi-matrimonio e inserisce Serena ed Enrico come matrimonio attivo.
 
 ## Configurazione R2
 
-Il progetto è collegato esplicitamente al bucket R2 esistente `wedding-media` con jurisdiction `eu`. Il binding `MEDIA_BUCKET` è disponibile al Worker. Il deploy disabilita inoltre il provisioning automatico di Wrangler. M0 non espone upload, lettura pubblica o credenziali R2. Nessuna chiave o secret deve essere aggiunta al repository.
+Il progetto è collegato esplicitamente al bucket R2 esistente `wedding-media` con jurisdiction `eu`. Il binding `MEDIA_BUCKET` è disponibile al Worker. Il deploy disabilita inoltre il provisioning automatico di Wrangler. M1 non espone upload, lettura pubblica o credenziali R2. Nessuna chiave o secret deve essere aggiunta al repository.
 
 ## Deployment
 
@@ -110,11 +116,16 @@ photobooth/       # placeholder per la futura integrazione Linux
 
 I file principali alla radice sono `wrangler.jsonc`, `vite.config.ts`, `tsconfig.json`, `eslint.config.js` e `index.html`.
 
-## Fuori scope per M0
+## Fuori scope per M1
 
 Non sono ancora implementati login, RSVP, upload o URL firmati, gallery, area admin, sync Photobooth, Turnstile e Fantasposi. Non esistono ancora tabelle guest, media o RSVP. Il bucket R2 è soltanto configurato come binding.
 
-## Prima di M1
+## Convenzioni multi-wedding future
 
-- decidere dominio, ambienti (preview/production) e strategia di accesso admin;
+Le future tabelle legate a invitati, RSVP e media dovranno contenere `wedding_id` come foreign key verso `weddings.id`. Gli oggetti nel bucket R2 dovranno essere separati per matrimonio usando il namespace `weddings/{wedding-slug}/...`.
+
+## Dati da completare nelle prossime milestone
+
+- aggiungere indirizzi e link reali per Chiesetta di Cendrole e Villa Peggy's;
+- definire parcheggio, contatti, dress code ed eventuali servizi di navetta/pernottamento;
 - definire i requisiti dati e privacy per invitati e media prima di estendere lo schema.

@@ -3,6 +3,12 @@
   "name": "serena-enrico-wedding",
   "main": "src/api/worker.ts",
   "compatibility_date": "2026-05-22",
+  "vars": {
+    "CURRENT_WEDDING_SLUG": "serena-enrico-2027",
+    "R2_ACCOUNT_ID": "60c876aaa5b66655a1bd923112d1db09",
+    "TEAM_DOMAIN": "https://enryserehome.cloudflareaccess.com",
+    "POLICY_AUD": "ec0582374761b3b1186b7572db7bb7443089fd6d93e204332f39dc8f09202f3e"
+  },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
@@ -23,5 +29,24 @@
       "bucket_name": "wedding-media",
       "jurisdiction": "eu"
     }
-  ]
+  ],
+  "images": {
+    "binding": "IMAGES"
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "MEDIA_PROCESSING_QUEUE",
+        "queue": "wedding-media-processing"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "wedding-media-processing",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  }
 }
