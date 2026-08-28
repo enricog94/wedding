@@ -613,6 +613,68 @@ button.gallery-item:hover .gallery-item__image {
   }
 }
 
+/* Editorial couple photograph */
+.editorial-photo {
+  width: calc(100% + 1rem);
+  margin-inline: -0.5rem;
+  overflow: hidden;
+  background: var(--color-paper);
+}
+
+.editorial-photo__media {
+  position: relative;
+  height: clamp(28rem, 66svh, 34rem);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.editorial-photo__media::after {
+  position: absolute;
+  z-index: 0;
+  inset: auto 0 0;
+  height: 38%;
+  background: linear-gradient(to top, color-mix(in srgb, var(--color-text) 58%, transparent), transparent);
+  content: '';
+  pointer-events: none;
+}
+
+.editorial-photo__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 52% 44%;
+}
+
+.editorial-photo__caption {
+  position: absolute;
+  z-index: 1;
+  bottom: 1.5rem;
+  left: 1.25rem;
+  width: min(17rem, calc(100% - 2.5rem));
+  margin: 0;
+  color: var(--color-paper);
+  font: italic 500 clamp(1.55rem, 7vw, 2.2rem)/1.05 var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+@media (min-width: 48rem) {
+  .editorial-photo__media {
+    height: clamp(42rem, 66.67vw, 62rem);
+  }
+
+  .editorial-photo__image {
+    object-position: 50% 44%;
+  }
+
+  .editorial-photo__caption {
+    bottom: clamp(2.5rem, 5vw, 5rem);
+    left: clamp(2.5rem, 6vw, 7rem);
+    width: min(24rem, 32vw);
+    font-size: clamp(2rem, 3vw, 3.25rem);
+  }
+}
+
 .scroll-cue {
   position: absolute;
   bottom: 1.25rem;

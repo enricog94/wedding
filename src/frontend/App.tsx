@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Countdown } from '../components/Countdown';
+import { EditorialPhotoSection } from '../components/EditorialPhotoSection';
 import { LocationCard } from '../components/LocationCard';
 import { Navigation } from '../components/Navigation';
 import { Section } from '../components/Section';
@@ -103,6 +104,8 @@ export function App() {
             </div>
           </section>
         </div>
+
+        <EditorialPhotoSection />
 
         {showSchedule && (
           <Section id="programma" tone="paper" className="program-section">
