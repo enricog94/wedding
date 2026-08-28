@@ -18,11 +18,15 @@ type ApprovedMediaPickerProps = {
 };
 
 async function loadApprovedImages(): Promise<ApprovedMedia[]> {
-  const response = await fetch('/api/admin/media?status=approved');
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('La sessione amministratore è scaduta. Ricarica la pagina.');
+  const endpoint = '/api/admin/media?status=approved';
+  const response = await fetch(endpoint, { credentials: 'same-origin', redirect: 'manual' });
+  if (response.type === 'opaqueredirect') {
+    throw new Error(`${endpoint}: autenticazione Cloudflare Access richiesta (redirect).`);
   }
-  if (!response.ok) throw new Error('Impossibile caricare le immagini approvate.');
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`${endpoint}: HTTP ${response.status}. La sessione amministratore è scaduta.`);
+  }
+  if (!response.ok) throw new Error(`${endpoint}: HTTP ${response.status}. Impossibile caricare le immagini approvate.`);
   const payload = await response.json() as { media?: ApprovedMedia[] };
   return (payload.media ?? []).filter((media) => (
     media.status === 'approved'

@@ -6,8 +6,7 @@
   "vars": {
     "CURRENT_WEDDING_SLUG": "serena-enrico-2027",
     "R2_ACCOUNT_ID": "60c876aaa5b66655a1bd923112d1db09",
-    "TEAM_DOMAIN": "https://enryserehome.cloudflareaccess.com",
-    "POLICY_AUD": "ec0582374761b3b1186b7572db7bb7443089fd6d93e204332f39dc8f09202f3e"
+    "TEAM_DOMAIN": "https://enryserehome.cloudflareaccess.com"
   },
   "assets": {
     "directory": "./dist/client",

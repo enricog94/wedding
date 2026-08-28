@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type NavigationProps = {
   brideName: string;
@@ -8,10 +8,12 @@ type NavigationProps = {
     locations: boolean;
     info: boolean;
   };
+  overHero?: boolean;
 };
 
-export function Navigation({ brideName, groomName, sections }: NavigationProps) {
+export function Navigation({ brideName, groomName, sections, overHero = false }: NavigationProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(() => overHero && window.scrollY > 24);
   const brideInitial = brideName.trim().charAt(0).toUpperCase();
   const groomInitial = groomName.trim().charAt(0).toUpperCase();
   const links = [
@@ -20,6 +22,13 @@ export function Navigation({ brideName, groomName, sections }: NavigationProps) 
     { href: '/#location', label: 'Location', visible: sections?.locations !== false },
     { href: '/gallery', label: 'Gallery', visible: true },
   ].filter((link) => link.visible);
+
+  useEffect(() => {
+    if (!overHero) return undefined;
+    const updateHeader = () => setIsScrolled(window.scrollY > 24);
+    window.addEventListener('scroll', updateHeader, { passive: true });
+    return () => window.removeEventListener('scroll', updateHeader);
+  }, [overHero]);
 
   const toggleMenu = () => {
     setIsOpen((open) => {
@@ -35,7 +44,7 @@ export function Navigation({ brideName, groomName, sections }: NavigationProps) 
   };
 
   return (
-    <header className="site-header">
+    <header className={`site-header${overHero ? ' site-header--overlay' : ''}${isScrolled ? ' is-scrolled' : ''}`}>
       <a className="site-mark" href="/#home" onClick={closeMenu} aria-label={`${brideName} e ${groomName}, torna alla Home`}>
         {brideInitial} <span>&amp;</span> {groomInitial}
       </a>

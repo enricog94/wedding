@@ -11,7 +11,7 @@ export interface Env {
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   TEAM_DOMAIN: string;
-  POLICY_AUD: string;
+  ACCESS_AUD: string;
 }
 
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' };
@@ -29,11 +29,21 @@ const MEDIA_TYPES = {
   'video/quicktime': { extension: 'mov', maxSize: 500 * MEGABYTE },
 } as const;
 
+const SITE_ASSET_TYPES = new Set(['hero', 'story', 'location', 'info', 'other']);
+const SITE_IMAGE_TYPES = {
+  'image/jpeg': { extension: 'jpg' },
+  'image/png': { extension: 'png' },
+  'image/webp': { extension: 'webp' },
+  'image/heic': { extension: 'heic' },
+  'image/heif': { extension: 'heif' },
+} as const;
+const SITE_ASSET_MAX_SIZE = 20 * MEGABYTE;
+
 type SupportedMimeType = keyof typeof MEDIA_TYPES;
 
-export type MediaProcessingMessage = {
-  mediaId: number;
-};
+export type MediaProcessingMessage =
+  | { kind?: 'media'; mediaId: number }
+  | { kind: 'site_asset'; siteAssetId: number };
 
 const textEncoder = new TextEncoder();
 
@@ -231,7 +241,7 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorizat
   }
 
   const teamDomain = env.TEAM_DOMAIN?.trim().replace(/\/$/, '');
-  const audience = env.POLICY_AUD?.trim();
+  const audience = env.ACCESS_AUD?.trim();
   if (!teamDomain || !audience) {
     console.error('Cloudflare Access validation is not configured');
     return {
@@ -268,6 +278,7 @@ type WeddingRow = {
 type WeddingSettingsRow = {
   wedding_id: number;
   gallery_enabled: number;
+  gallery_preview_enabled: number;
   guest_uploads_enabled: number;
   require_guest_approval: number;
   photobooth_auto_approve: number;
@@ -278,6 +289,7 @@ type WeddingSettingsRow = {
 
 type WeddingSettings = {
   galleryEnabled: boolean;
+  galleryPreviewEnabled: boolean;
   guestUploadsEnabled: boolean;
   requireGuestApproval: boolean;
   photoboothAutoApprove: boolean;
@@ -322,6 +334,26 @@ type MediaProcessingRow = MediaRow & {
   wedding_slug: string;
 };
 
+type SiteAssetRow = {
+  id: number;
+  uuid: string;
+  wedding_id: number;
+  asset_type: string;
+  original_filename: string | null;
+  original_key: string;
+  optimized_key: string | null;
+  mime_type: string;
+  size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  status: string;
+  created_at: string;
+  uploaded_at: string | null;
+  processed_at: string | null;
+};
+
+type SiteAssetProcessingRow = SiteAssetRow & { wedding_slug: string };
+
 type GalleryRow = Pick<
   MediaRow,
   'id' | 'uuid' | 'source' | 'mime_type' | 'created_at' | 'preview_status'
@@ -356,6 +388,7 @@ async function findCurrentWedding(env: Env): Promise<WeddingRow | null> {
 
 const DEFAULT_WEDDING_SETTINGS: WeddingSettings = {
   galleryEnabled: true,
+  galleryPreviewEnabled: true,
   guestUploadsEnabled: true,
   requireGuestApproval: true,
   photoboothAutoApprove: true,
@@ -368,6 +401,7 @@ function serializeWeddingSettings(row: WeddingSettingsRow | null): WeddingSettin
   if (!row) return DEFAULT_WEDDING_SETTINGS;
   return {
     galleryEnabled: row.gallery_enabled === 1,
+    galleryPreviewEnabled: row.gallery_preview_enabled === 1,
     guestUploadsEnabled: row.guest_uploads_enabled === 1,
     requireGuestApproval: row.require_guest_approval === 1,
     photoboothAutoApprove: row.photobooth_auto_approve === 1,
@@ -379,7 +413,7 @@ function serializeWeddingSettings(row: WeddingSettingsRow | null): WeddingSettin
 
 async function getWeddingSettings(env: Env, weddingId: number): Promise<WeddingSettings> {
   const row = await env.DB.prepare(
-    `SELECT wedding_id, gallery_enabled, guest_uploads_enabled,
+    `SELECT wedding_id, gallery_enabled, gallery_preview_enabled, guest_uploads_enabled,
             require_guest_approval, photobooth_auto_approve,
             schedule_enabled, locations_enabled, info_enabled
      FROM wedding_settings
@@ -459,6 +493,55 @@ async function deleteOwnedMedia(env: Env, weddingId: number, mediaId: number): P
   return true;
 }
 
+const SITE_ASSET_SELECT = `SELECT id, uuid, wedding_id, asset_type, original_filename,
+                                  original_key, optimized_key, mime_type, size_bytes,
+                                  width, height, status, created_at, uploaded_at, processed_at
+                           FROM site_assets`;
+
+function siteAssetPayload(row: SiteAssetRow, admin: boolean) {
+  return {
+    id: row.id,
+    uuid: row.uuid,
+    assetType: row.asset_type,
+    originalFilename: row.original_filename,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    width: row.width,
+    height: row.height,
+    status: row.status,
+    createdAt: row.created_at,
+    uploadedAt: row.uploaded_at,
+    processedAt: row.processed_at,
+    viewUrl: row.status === 'ready'
+      ? `${admin ? '/api/admin' : '/api'}/site-assets/${row.id}/view`
+      : null,
+  };
+}
+
+async function findOwnedSiteAsset(
+  env: Env,
+  weddingId: number,
+  siteAssetId: number,
+): Promise<SiteAssetRow | null> {
+  return env.DB.prepare(
+    `${SITE_ASSET_SELECT} WHERE id = ? AND wedding_id = ? LIMIT 1`,
+  ).bind(siteAssetId, weddingId).first<SiteAssetRow>();
+}
+
+async function deleteOwnedSiteAsset(
+  env: Env,
+  weddingId: number,
+  siteAssetId: number,
+): Promise<boolean> {
+  const asset = await findOwnedSiteAsset(env, weddingId, siteAssetId);
+  if (!asset) return false;
+  await env.MEDIA_BUCKET.delete(asset.original_key);
+  if (asset.optimized_key) await env.MEDIA_BUCKET.delete(asset.optimized_key);
+  await env.DB.prepare('DELETE FROM site_assets WHERE id = ? AND wedding_id = ?')
+    .bind(asset.id, weddingId).run();
+  return true;
+}
+
 async function runLimited<T>(
   values: T[],
   limit: number,
@@ -479,6 +562,7 @@ function parseBooleanSettings(body: unknown): WeddingSettings | null {
   const input = body as Record<string, unknown>;
   const keys = [
     'galleryEnabled',
+    'galleryPreviewEnabled',
     'guestUploadsEnabled',
     'requireGuestApproval',
     'photoboothAutoApprove',
@@ -489,6 +573,7 @@ function parseBooleanSettings(body: unknown): WeddingSettings | null {
   if (!keys.every((key) => typeof input[key] === 'boolean')) return null;
   return {
     galleryEnabled: input.galleryEnabled as boolean,
+    galleryPreviewEnabled: input.galleryPreviewEnabled as boolean,
     guestUploadsEnabled: input.guestUploadsEnabled as boolean,
     requireGuestApproval: input.requireGuestApproval as boolean,
     photoboothAutoApprove: input.photoboothAutoApprove as boolean,
@@ -606,6 +691,84 @@ export async function processMediaPreview(
   }
 }
 
+export async function processSiteAsset(
+  env: Env,
+  siteAssetId: number,
+): Promise<'missing' | 'ready' | 'generated'> {
+  const asset = await env.DB.prepare(
+    `SELECT a.id, a.uuid, a.wedding_id, a.asset_type, a.original_filename,
+            a.original_key, a.optimized_key, a.mime_type, a.size_bytes,
+            a.width, a.height, a.status, a.created_at, a.uploaded_at,
+            a.processed_at, w.slug AS wedding_slug
+     FROM site_assets a
+     INNER JOIN weddings w ON w.id = a.wedding_id
+     WHERE a.id = ?
+     LIMIT 1`,
+  ).bind(siteAssetId).first<SiteAssetProcessingRow>();
+
+  if (!asset) return 'missing';
+  if (asset.status === 'ready' && asset.optimized_key) return 'ready';
+
+  await env.DB.prepare(
+    `UPDATE site_assets SET status = 'processing' WHERE id = ?`,
+  ).bind(asset.id).run();
+
+  try {
+    const original = await env.MEDIA_BUCKET.get(asset.original_key);
+    if (!original) throw new Error('Original site asset object not found');
+    const optimizedKey = `weddings/${asset.wedding_slug}/site/optimized/${asset.uuid}.webp`;
+    const transformed = await env.IMAGES.input(original.body)
+      .transform({ width: 2200, fit: 'scale-down' })
+      .output({ format: 'image/webp', quality: 84 });
+    await env.MEDIA_BUCKET.put(optimizedKey, transformed.image(), {
+      httpMetadata: {
+        contentType: 'image/webp',
+        cacheControl: 'public, max-age=31536000, immutable',
+      },
+    });
+    await env.DB.prepare(
+      `UPDATE site_assets
+       SET optimized_key = ?, status = 'ready', processed_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+    ).bind(optimizedKey, asset.id).run();
+    return 'generated';
+  } catch (error) {
+    await env.DB.prepare(
+      `UPDATE site_assets SET status = 'failed', processed_at = NULL WHERE id = ?`,
+    ).bind(asset.id).run();
+    throw error;
+  }
+}
+
+async function siteAssetViewResponse(
+  env: Env,
+  asset: Pick<SiteAssetRow, 'optimized_key'>,
+  request: Request,
+  admin: boolean,
+): Promise<Response> {
+  if (!asset.optimized_key) return json({ error: 'Optimized site asset not found' }, 404);
+  const object = await env.MEDIA_BUCKET.get(asset.optimized_key);
+  if (!object) return json({ error: 'Optimized site asset object not found' }, 404);
+  const etag = object.httpEtag;
+  if (etag && request.headers.get('if-none-match') === etag) {
+    return new Response(null, {
+      status: 304,
+      headers: {
+        etag,
+        'cache-control': admin ? 'private, no-store' : 'public, max-age=31536000, immutable',
+      },
+    });
+  }
+  return new Response(object.body, {
+    headers: {
+      'content-type': 'image/webp',
+      'content-length': String(object.size),
+      ...(etag ? { etag } : {}),
+      'cache-control': admin ? 'private, no-store' : 'public, max-age=31536000, immutable',
+    },
+  });
+}
+
 async function previewResponse(
   env: Env,
   media: Pick<MediaRow, 'thumbnail_key' | 'preview_key'>,
@@ -699,6 +862,7 @@ export default {
         const settings = await getWeddingSettings(env, wedding.id);
         return json({
           galleryEnabled: settings.galleryEnabled,
+          galleryPreviewEnabled: settings.galleryPreviewEnabled,
           guestUploadsEnabled: settings.guestUploadsEnabled,
         });
       } catch (error) {
@@ -734,12 +898,13 @@ export default {
 
         await env.DB.prepare(
            `INSERT INTO wedding_settings (
-              wedding_id, gallery_enabled, guest_uploads_enabled,
+              wedding_id, gallery_enabled, gallery_preview_enabled, guest_uploads_enabled,
               require_guest_approval, photobooth_auto_approve,
               schedule_enabled, locations_enabled, info_enabled, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(wedding_id) DO UPDATE SET
               gallery_enabled = excluded.gallery_enabled,
+              gallery_preview_enabled = excluded.gallery_preview_enabled,
               guest_uploads_enabled = excluded.guest_uploads_enabled,
               require_guest_approval = excluded.require_guest_approval,
               photobooth_auto_approve = excluded.photobooth_auto_approve,
@@ -751,6 +916,7 @@ export default {
           .bind(
             wedding.id,
             Number(settings.galleryEnabled),
+            Number(settings.galleryPreviewEnabled),
             Number(settings.guestUploadsEnabled),
             Number(settings.requireGuestApproval),
             Number(settings.photoboothAutoApprove),
@@ -764,6 +930,150 @@ export default {
         if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body' }, 400);
         console.error('Unable to update wedding settings', error);
         return json({ error: 'Unable to update wedding settings' }, 500);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/admin/site-assets') {
+      const assetType = url.searchParams.get('asset_type');
+      if (assetType && !SITE_ASSET_TYPES.has(assetType)) {
+        return json({ error: 'Invalid site asset type' }, 400);
+      }
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
+          return json({ error: 'Current wedding is not configured' }, 500);
+        }
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        const result = assetType
+          ? await env.DB.prepare(
+              `${SITE_ASSET_SELECT}
+               WHERE wedding_id = ? AND asset_type = ?
+               ORDER BY created_at DESC, id DESC`,
+            ).bind(wedding.id, assetType).all<SiteAssetRow>()
+          : await env.DB.prepare(
+              `${SITE_ASSET_SELECT}
+               WHERE wedding_id = ?
+               ORDER BY created_at DESC, id DESC`,
+            ).bind(wedding.id).all<SiteAssetRow>();
+        return json({ siteAssets: result.results.map((row) => siteAssetPayload(row, true)) });
+      } catch (error) {
+        console.error('Unable to list site assets', error);
+        return json({ error: 'Site assets unavailable' }, 500);
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/admin/site-assets/create') {
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
+          return json({ error: 'Current wedding is not configured' }, 500);
+        }
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        const body: unknown = await request.json();
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return json({ error: 'JSON body must be an object' }, 400);
+        }
+        const input = body as Record<string, unknown>;
+        const filename = typeof input.filename === 'string' ? input.filename.trim() : '';
+        const mimeType = typeof input.mimeType === 'string' ? input.mimeType.trim().toLowerCase() : '';
+        const assetType = typeof input.assetType === 'string' ? input.assetType.trim().toLowerCase() : 'other';
+        const size = input.size;
+        if (!filename) return json({ error: 'Filename is required' }, 400);
+        if (!Object.prototype.hasOwnProperty.call(SITE_IMAGE_TYPES, mimeType)) {
+          return json({ error: 'Unsupported site image type' }, 400);
+        }
+        if (!SITE_ASSET_TYPES.has(assetType)) return json({ error: 'Invalid site asset type' }, 400);
+        if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0) {
+          return json({ error: 'Size must be a positive integer' }, 400);
+        }
+        if (size > SITE_ASSET_MAX_SIZE) return json({ error: 'File exceeds the 20 MB limit' }, 400);
+
+        const uuid = crypto.randomUUID();
+        const imageType = SITE_IMAGE_TYPES[mimeType as keyof typeof SITE_IMAGE_TYPES];
+        const originalKey = `weddings/${wedding.slug}/site/originals/${uuid}.${imageType.extension}`;
+        const uploadUrl = await createPresignedPutUrl(env, originalKey);
+        const result = await env.DB.prepare(
+          `INSERT INTO site_assets
+             (uuid, wedding_id, asset_type, original_filename, original_key,
+              mime_type, size_bytes, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'uploading')`,
+        ).bind(uuid, wedding.id, assetType, filename, originalKey, mimeType, size).run();
+        return json({
+          siteAssetId: result.meta.last_row_id,
+          uuid,
+          originalKey,
+          uploadUrl,
+          method: 'PUT',
+        }, 201);
+      } catch (error) {
+        if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body' }, 400);
+        console.error('Unable to create site asset', error);
+        return json({ error: 'Unable to create site asset' }, 500);
+      }
+    }
+
+    const completeSiteAsset = url.pathname.match(/^\/api\/admin\/site-assets\/(\d+)\/complete$/);
+    if (request.method === 'POST' && completeSiteAsset) {
+      const siteAssetId = Number(completeSiteAsset[1]);
+      if (!Number.isSafeInteger(siteAssetId) || siteAssetId <= 0) {
+        return json({ error: 'Invalid site asset ID' }, 400);
+      }
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        const asset = await findOwnedSiteAsset(env, wedding.id, siteAssetId);
+        if (!asset) return json({ error: 'Site asset not found' }, 404);
+        const object = await env.MEDIA_BUCKET.head(asset.original_key);
+        if (!object) return json({ error: 'Uploaded object not found' }, 409);
+        if (asset.size_bytes === null || object.size !== asset.size_bytes) {
+          return json({ error: 'Uploaded object size does not match' }, 409);
+        }
+        if (asset.status !== 'ready') {
+          await env.DB.prepare(
+            `UPDATE site_assets
+             SET status = 'processing', uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
+             WHERE id = ? AND wedding_id = ?`,
+          ).bind(asset.id, wedding.id).run();
+          await env.MEDIA_PROCESSING_QUEUE.send({ kind: 'site_asset', siteAssetId: asset.id });
+        }
+        return json({ siteAssetId: asset.id, status: asset.status === 'ready' ? 'ready' : 'processing' });
+      } catch (error) {
+        console.error('Unable to complete site asset upload', error);
+        return json({ error: 'Unable to complete site asset upload' }, 500);
+      }
+    }
+
+    const adminSiteAssetView = url.pathname.match(/^\/api\/admin\/site-assets\/(\d+)\/view$/);
+    if (request.method === 'GET' && adminSiteAssetView) {
+      const siteAssetId = Number(adminSiteAssetView[1]);
+      if (!Number.isSafeInteger(siteAssetId) || siteAssetId <= 0) return json({ error: 'Not found' }, 404);
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        const asset = await findOwnedSiteAsset(env, wedding.id, siteAssetId);
+        if (!asset || asset.status !== 'ready') return json({ error: 'Site asset not found' }, 404);
+        return siteAssetViewResponse(env, asset, request, true);
+      } catch (error) {
+        console.error('Unable to serve admin site asset', error);
+        return json({ error: 'Site asset unavailable' }, 500);
+      }
+    }
+
+    const deleteSiteAsset = url.pathname.match(/^\/api\/admin\/site-assets\/(\d+)$/);
+    if (request.method === 'DELETE' && deleteSiteAsset) {
+      const siteAssetId = Number(deleteSiteAsset[1]);
+      if (!Number.isSafeInteger(siteAssetId) || siteAssetId <= 0) {
+        return json({ error: 'Invalid site asset ID' }, 400);
+      }
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        return await deleteOwnedSiteAsset(env, wedding.id, siteAssetId)
+          ? json({ id: siteAssetId, deleted: true })
+          : json({ error: 'Site asset not found' }, 404);
+      } catch (error) {
+        console.error('Unable to delete site asset', error);
+        return json({ error: 'Unable to delete site asset' }, 500);
       }
     }
 
@@ -1309,7 +1619,7 @@ export default {
 
         const settings = await getWeddingSettings(env, wedding.id);
         if (!settings.galleryEnabled) {
-          return json({ galleryEnabled: false, media: [] });
+          return json({ galleryEnabled: false, galleryPreviewEnabled: false, media: [] });
         }
 
         const result = await env.DB.prepare(
@@ -1323,6 +1633,7 @@ export default {
 
         return json({
           galleryEnabled: true,
+          galleryPreviewEnabled: settings.galleryPreviewEnabled,
           media: result.results.map((row) => ({
             id: row.id,
             uuid: row.uuid,
@@ -1449,6 +1760,22 @@ export default {
       }
     }
 
+    const publicSiteAssetView = url.pathname.match(/^\/api\/site-assets\/(\d+)\/view$/);
+    if (request.method === 'GET' && publicSiteAssetView) {
+      const siteAssetId = Number(publicSiteAssetView[1]);
+      if (!Number.isSafeInteger(siteAssetId) || siteAssetId <= 0) return json({ error: 'Not found' }, 404);
+      try {
+        const wedding = await findCurrentWedding(env);
+        if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
+        const asset = await findOwnedSiteAsset(env, wedding.id, siteAssetId);
+        if (!asset || asset.status !== 'ready') return json({ error: 'Site asset not found' }, 404);
+        return siteAssetViewResponse(env, asset, request, false);
+      } catch (error) {
+        console.error('Unable to serve public site asset', error);
+        return json({ error: 'Site asset unavailable' }, 500);
+      }
+    }
+
     if (url.pathname.startsWith('/api/')) {
       return json({ error: 'Not found' }, 404);
     }
@@ -1458,6 +1785,23 @@ export default {
 
   async queue(batch: MessageBatch<MediaProcessingMessage>, env: Env): Promise<void> {
     for (const message of batch.messages) {
+      if (message.body?.kind === 'site_asset') {
+        const siteAssetId = message.body.siteAssetId;
+        if (!Number.isSafeInteger(siteAssetId) || siteAssetId <= 0) {
+          console.warn('Ignoring invalid site asset processing message');
+          message.ack();
+          continue;
+        }
+        try {
+          await processSiteAsset(env, siteAssetId);
+          message.ack();
+        } catch (error) {
+          console.error(`Unable to optimize site asset ${siteAssetId}`, error);
+          message.retry({ delaySeconds: Math.min(300, 30 * Math.max(1, message.attempts)) });
+        }
+        continue;
+      }
+
       const mediaId = message.body?.mediaId;
       if (!Number.isSafeInteger(mediaId) || mediaId <= 0) {
         console.warn('Ignoring invalid media processing message');

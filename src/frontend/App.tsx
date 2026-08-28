@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef, ReactNode } from 'react';
 import { Countdown } from '../components/Countdown';
+import { GalleryPreview } from '../components/GalleryPreview';
 import { LocationCard } from '../components/LocationCard';
 import { Navigation } from '../components/Navigation';
 import { Section } from '../components/Section';
@@ -91,13 +92,14 @@ export function App() {
         brideName={wedding.brideName}
         groomName={wedding.groomName}
         sections={{ schedule: showSchedule, locations: showLocations, info: showInfo }}
+        overHero={!isPhotoPage && !isGalleryPage && !isAdminPage}
       />
       {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminPage /> : <main>
         <div className="hero-viewport">
           <section id="home" className="hero hero--photo" aria-labelledby="wedding-title">
             <img
               className="hero-photo__image"
-              src="/images/serena-enrico-editorial.jpg"
+              src={wedding.heroPhoto?.previewUrl ?? '/images/serena-enrico-editorial.jpg'}
               alt={`${wedding.brideName} ed ${wedding.groomName} sorridono con i volti vicini tra gli alberi`}
               width="2993"
               height="1995"
@@ -236,21 +238,7 @@ export function App() {
           </FadeIn>
         </Section>
 
-        {/* M5.7: GALLERY PREVIEW */}
-        <Section id="gallery-preview" tone="ivory" className="gallery-preview-section">
-          <FadeIn>
-            <SectionTitle eyebrow="Ricordi" title="Gallery" align="center" />
-            <div className="gallery-preview-grid">
-              <div className="gp-img gp-img--1"></div>
-              <div className="gp-img gp-img--2"></div>
-              <div className="gp-img gp-img--3"></div>
-              <div className="gp-img gp-img--4"></div>
-            </div>
-            <div className="gallery-preview__action">
-              <a href="/gallery" className="button">Vedi tutte le foto</a>
-            </div>
-          </FadeIn>
-        </Section>
+        <GalleryPreview />
       </main>}
       <footer className="site-footer">
         <ThemeDecoration theme={theme} slot="footer" />

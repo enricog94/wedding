@@ -14,6 +14,8 @@ type ContentWeddingRow = {
   hero_eyebrow: string | null;
   hero_title: string | null;
   hero_subtitle: string | null;
+  hero_site_asset_id: number | null;
+  hero_site_asset_status: string | null;
 };
 
 type SectionSettingsRow = {
@@ -42,9 +44,11 @@ type LocationRow = {
   maps_url: string | null;
   description: string | null;
   photo_media_id: number | null;
+  photo_site_asset_id: number | null;
   sort_order: number;
   enabled: number;
   photo_preview_status?: string | null;
+  photo_site_asset_status?: string | null;
 };
 
 type HomeContentRow = {
@@ -55,6 +59,8 @@ type HomeContentRow = {
   story_intro: string | null;
   story_quote: string | null;
   story_quote_author: string | null;
+  hero_site_asset_id: number | null;
+  hero_site_asset_status?: string | null;
 };
 
 type StoryItemRow = {
@@ -64,9 +70,11 @@ type StoryItemRow = {
   title: string;
   body: string | null;
   photo_media_id: number | null;
+  photo_site_asset_id: number | null;
   sort_order: number;
   enabled: number;
   photo_preview_status?: string | null;
+  photo_site_asset_status?: string | null;
 };
 
 type InfoRow = {
@@ -75,6 +83,7 @@ type InfoRow = {
   category: string;
   title: string;
   content: string | null;
+  image_site_asset_id: number | null;
   sort_order: number;
   enabled: number;
 };
@@ -84,7 +93,7 @@ type ScheduleInput = Omit<ScheduleRow, 'id' | 'wedding_id' | 'enabled' | 'sort_o
   sortOrder: number;
 };
 
-type LocationInput = Omit<LocationRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order' | 'maps_url' | 'photo_preview_status'> & {
+type LocationInput = Omit<LocationRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order' | 'maps_url' | 'photo_preview_status' | 'photo_site_asset_status'> & {
   mapsUrl: string | null;
   enabled: boolean;
   sortOrder: number;
@@ -104,6 +113,7 @@ type StoryItemInput = {
   title: string;
   body: string | null;
   photoMediaId: number | null;
+  photoSiteAssetId: number | null;
   sortOrder: number;
   enabled: boolean;
 };
@@ -202,7 +212,33 @@ function optionalHttpsUrl(input: Record<string, unknown>, key: string): string |
   }
 }
 
-function serializeWedding(row: ContentWeddingRow) {
+function selectedContentPhoto(
+  siteAssetId: number | null,
+  siteAssetStatus: string | null | undefined,
+  legacyMediaId: number | null,
+  legacyPreviewStatus: string | null | undefined,
+  admin: boolean,
+) {
+  if (siteAssetId && siteAssetStatus === 'ready') {
+    return {
+      id: siteAssetId,
+      thumbnailUrl: `${admin ? '/api/admin' : '/api'}/site-assets/${siteAssetId}/view`,
+      previewUrl: `${admin ? '/api/admin' : '/api'}/site-assets/${siteAssetId}/view`,
+      source: 'site_asset' as const,
+    };
+  }
+  if (legacyMediaId && legacyPreviewStatus === 'ready') {
+    return {
+      id: legacyMediaId,
+      thumbnailUrl: `${admin ? '/api/admin' : '/api'}/media/${legacyMediaId}/thumbnail`,
+      previewUrl: `${admin ? '/api/admin' : '/api'}/media/${legacyMediaId}/preview`,
+      source: 'legacy_media' as const,
+    };
+  }
+  return null;
+}
+
+function serializeWedding(row: ContentWeddingRow, admin = false) {
   return {
     id: row.id,
     slug: row.slug,
@@ -214,6 +250,14 @@ function serializeWedding(row: ContentWeddingRow) {
     heroEyebrow: row.hero_eyebrow,
     heroTitle: row.hero_title,
     heroSubtitle: row.hero_subtitle,
+    heroPhoto: selectedContentPhoto(
+      row.hero_site_asset_id,
+      row.hero_site_asset_status,
+      null,
+      null,
+      admin,
+    ),
+    ...(admin ? { heroSiteAssetId: row.hero_site_asset_id } : {}),
   };
 }
 
@@ -229,13 +273,13 @@ function serializeSchedule(row: ScheduleRow, admin = false) {
 }
 
 function serializeLocation(row: LocationRow, admin = false) {
-  const photo = row.photo_media_id && row.photo_preview_status === 'ready'
-    ? {
-        id: row.photo_media_id,
-        thumbnailUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/thumbnail`,
-        previewUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/preview`,
-      }
-    : null;
+  const photo = selectedContentPhoto(
+    row.photo_site_asset_id,
+    row.photo_site_asset_status,
+    row.photo_media_id,
+    row.photo_preview_status,
+    admin,
+  );
   return {
     id: row.id,
     name: row.name,
@@ -244,19 +288,22 @@ function serializeLocation(row: LocationRow, admin = false) {
     mapsUrl: row.maps_url,
     description: row.description,
     photo,
-    ...(admin ? { photoMediaId: row.photo_media_id } : {}),
+    ...(admin ? {
+      photoMediaId: row.photo_media_id,
+      photoSiteAssetId: row.photo_site_asset_id,
+    } : {}),
     ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled === 1 } : {}),
   };
 }
 
 function serializeStoryItem(row: StoryItemRow, admin = false) {
-  const photo = row.photo_media_id && row.photo_preview_status === 'ready'
-    ? {
-        id: row.photo_media_id,
-        thumbnailUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/thumbnail`,
-        previewUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/preview`,
-      }
-    : null;
+  const photo = selectedContentPhoto(
+    row.photo_site_asset_id,
+    row.photo_site_asset_status,
+    row.photo_media_id,
+    row.photo_preview_status,
+    admin,
+  );
   return {
     id: row.id,
     yearLabel: row.year_label,
@@ -265,6 +312,7 @@ function serializeStoryItem(row: StoryItemRow, admin = false) {
     photo,
     ...(admin ? {
       photoMediaId: row.photo_media_id,
+      photoSiteAssetId: row.photo_site_asset_id,
       sortOrder: row.sort_order,
       enabled: row.enabled === 1,
     } : {}),
@@ -300,7 +348,11 @@ function serializeInfo(row: InfoRow, admin = false) {
     category: row.category,
     title: row.title,
     content: row.content,
-    ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled === 1 } : {}),
+    ...(admin ? {
+      imageSiteAssetId: row.image_site_asset_id,
+      sortOrder: row.sort_order,
+      enabled: row.enabled === 1,
+    } : {}),
   };
 }
 
@@ -308,10 +360,14 @@ async function findCurrentWedding(env: ContentEnv): Promise<ContentWeddingRow | 
   const slug = env.CURRENT_WEDDING_SLUG?.trim();
   if (!slug) return null;
   return env.DB.prepare(
-    `SELECT id, slug, bride_name, groom_name, wedding_date, status, theme,
-            hero_eyebrow, hero_title, hero_subtitle
-     FROM weddings
-     WHERE slug = ?
+    `SELECT w.id, w.slug, w.bride_name, w.groom_name, w.wedding_date, w.status, w.theme,
+            w.hero_eyebrow, w.hero_title, w.hero_subtitle,
+            h.hero_site_asset_id, a.status AS hero_site_asset_status
+     FROM weddings w
+     LEFT JOIN wedding_home_content h ON h.wedding_id = w.id
+     LEFT JOIN site_assets a
+       ON a.id = h.hero_site_asset_id AND a.wedding_id = w.id
+     WHERE w.slug = ?
      LIMIT 1`,
   )
     .bind(slug)
@@ -349,6 +405,7 @@ function parseLocation(input: Record<string, unknown>): LocationInput {
     mapsUrl: optionalHttpsUrl(input, 'mapsUrl'),
     description: optionalString(input, 'description', 1200),
     photo_media_id: optionalPositiveInteger(input, 'photoMediaId'),
+    photo_site_asset_id: optionalPositiveInteger(input, 'photoSiteAssetId'),
     sortOrder: requiredSortOrder(input),
     enabled: requiredBoolean(input, 'enabled'),
   };
@@ -371,6 +428,7 @@ function parseStoryItem(input: Record<string, unknown>): StoryItemInput {
     title: requiredString(input, 'title', 160),
     body: optionalString(input, 'body', 5000),
     photoMediaId: optionalPositiveInteger(input, 'photoMediaId'),
+    photoSiteAssetId: optionalPositiveInteger(input, 'photoSiteAssetId'),
     sortOrder: requiredSortOrder(input),
     enabled: requiredBoolean(input, 'enabled'),
   };
@@ -383,6 +441,7 @@ function parseInfo(input: Record<string, unknown>): InfoInput {
     category,
     title: requiredString(input, 'title', 160),
     content: optionalString(input, 'content', 3000),
+    image_site_asset_id: optionalPositiveInteger(input, 'imageSiteAssetId'),
     sortOrder: requiredSortOrder(input),
     enabled: requiredBoolean(input, 'enabled'),
   };
@@ -404,11 +463,29 @@ async function validateApprovedImage(
   if (!media) throw new ValidationError('Selected media must be a preview-ready approved image from this wedding');
 }
 
+async function validateReadySiteAsset(
+  env: ContentEnv,
+  weddingId: number,
+  siteAssetId: number | null,
+): Promise<void> {
+  if (siteAssetId === null) return;
+  const asset = await env.DB.prepare(
+    `SELECT id FROM site_assets
+     WHERE id = ? AND wedding_id = ? AND status = 'ready'
+       AND mime_type LIKE 'image/%'
+     LIMIT 1`,
+  ).bind(siteAssetId, weddingId).first<{ id: number }>();
+  if (!asset) throw new ValidationError('Selected site asset must be a ready image from this wedding');
+}
+
 async function findHomeContent(env: ContentEnv, weddingId: number): Promise<HomeContentRow | null> {
   return env.DB.prepare(
     `SELECT h.wedding_id, h.story_enabled, h.story_eyebrow, h.story_title, h.story_intro,
-            h.story_quote, h.story_quote_author
+            h.story_quote, h.story_quote_author, h.hero_site_asset_id,
+            a.status AS hero_site_asset_status
      FROM wedding_home_content h
+     LEFT JOIN site_assets a
+       ON a.id = h.hero_site_asset_id AND a.wedding_id = h.wedding_id
      WHERE h.wedding_id = ?
      LIMIT 1`,
   ).bind(weddingId).first<HomeContentRow>();
@@ -421,13 +498,18 @@ async function listStoryItems(
 ): Promise<StoryItemRow[]> {
   const result = await env.DB.prepare(
     `SELECT s.id, s.wedding_id, s.year_label, s.title, s.body, s.photo_media_id,
-            s.sort_order, s.enabled, m.preview_status AS photo_preview_status
+            s.photo_site_asset_id, s.sort_order, s.enabled,
+            m.preview_status AS photo_preview_status,
+            a.status AS photo_site_asset_status
      FROM wedding_story_items s
      LEFT JOIN media m
        ON m.id = s.photo_media_id
       AND m.wedding_id = s.wedding_id
-      AND m.status = 'approved'
-      AND m.mime_type LIKE 'image/%'
+       AND m.status = 'approved'
+       AND m.mime_type LIKE 'image/%'
+     LEFT JOIN site_assets a
+       ON a.id = s.photo_site_asset_id
+      AND a.wedding_id = s.wedding_id
      WHERE s.wedding_id = ?${publicOnly ? ' AND s.enabled = 1' : ''}
      ORDER BY s.sort_order, s.id`,
   ).bind(weddingId).all<StoryItemRow>();
@@ -450,19 +532,23 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
     ).bind(wedding.id).all<ScheduleRow>(),
     env.DB.prepare(
       `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
-              l.photo_media_id, l.sort_order, l.enabled,
-              m.preview_status AS photo_preview_status
+              l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status,
+              a.status AS photo_site_asset_status
        FROM wedding_locations l
        LEFT JOIN media m
          ON m.id = l.photo_media_id
         AND m.wedding_id = l.wedding_id
-        AND m.status = 'approved'
-        AND m.mime_type LIKE 'image/%'
+         AND m.status = 'approved'
+         AND m.mime_type LIKE 'image/%'
+       LEFT JOIN site_assets a
+         ON a.id = l.photo_site_asset_id
+        AND a.wedding_id = l.wedding_id
        WHERE l.wedding_id = ? AND l.enabled = 1
        ORDER BY l.sort_order, l.id`,
     ).bind(wedding.id).all<LocationRow>(),
     env.DB.prepare(
-      `SELECT id, wedding_id, category, title, content, sort_order, enabled
+      `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
        FROM wedding_info_items
        WHERE wedding_id = ? AND enabled = 1
        ORDER BY sort_order, id`,
@@ -490,7 +576,7 @@ async function handleWeddingAdmin(
   env: ContentEnv,
   wedding: ContentWeddingRow,
 ): Promise<Response> {
-  if (request.method === 'GET') return json(serializeWedding(wedding));
+  if (request.method === 'GET') return json(serializeWedding(wedding, true));
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const input = await requestBody(request);
@@ -501,6 +587,8 @@ async function handleWeddingAdmin(
   const heroEyebrow = optionalString(input, 'heroEyebrow', 80);
   const heroTitle = optionalString(input, 'heroTitle', 160);
   const heroSubtitle = optionalString(input, 'heroSubtitle', 300);
+  const heroSiteAssetId = optionalPositiveInteger(input, 'heroSiteAssetId');
+  await validateReadySiteAsset(env, wedding.id, heroSiteAssetId);
 
   await env.DB.prepare(
     `UPDATE weddings
@@ -510,9 +598,16 @@ async function handleWeddingAdmin(
   )
     .bind(brideName, groomName, weddingDate, heroEyebrow, heroTitle, heroSubtitle, wedding.id)
     .run();
+  await env.DB.prepare(
+    `INSERT INTO wedding_home_content (wedding_id, hero_site_asset_id, updated_at)
+     VALUES (?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(wedding_id) DO UPDATE SET
+       hero_site_asset_id = excluded.hero_site_asset_id,
+       updated_at = CURRENT_TIMESTAMP`,
+  ).bind(wedding.id, heroSiteAssetId).run();
 
   const updated = await findCurrentWedding(env);
-  return json(serializeWedding(updated ?? wedding));
+  return json(serializeWedding(updated ?? wedding, true));
 }
 
 async function handleHomeContent(
@@ -566,12 +661,14 @@ async function handleStoryItems(
 
     const item = parseStoryItem(await requestBody(request));
     await validateApprovedImage(env, weddingId, item.photoMediaId);
+    await validateReadySiteAsset(env, weddingId, item.photoSiteAssetId);
     const result = await env.DB.prepare(
       `INSERT INTO wedding_story_items
-         (wedding_id, year_label, title, body, photo_media_id, sort_order, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (wedding_id, year_label, title, body, photo_media_id, photo_site_asset_id,
+          sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      weddingId, item.yearLabel, item.title, item.body, item.photoMediaId,
+      weddingId, item.yearLabel, item.title, item.body, item.photoMediaId, item.photoSiteAssetId,
       item.sortOrder, Number(item.enabled),
     ).run();
     const created = (await listStoryItems(env, weddingId, false))
@@ -594,13 +691,14 @@ async function handleStoryItems(
 
   const item = parseStoryItem(await requestBody(request));
   await validateApprovedImage(env, weddingId, item.photoMediaId);
+  await validateReadySiteAsset(env, weddingId, item.photoSiteAssetId);
   await env.DB.prepare(
     `UPDATE wedding_story_items
-     SET year_label = ?, title = ?, body = ?, photo_media_id = ?, sort_order = ?,
-         enabled = ?, updated_at = CURRENT_TIMESTAMP
+     SET year_label = ?, title = ?, body = ?, photo_media_id = ?, photo_site_asset_id = ?,
+          sort_order = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
-    item.yearLabel, item.title, item.body, item.photoMediaId, item.sortOrder,
+    item.yearLabel, item.title, item.body, item.photoMediaId, item.photoSiteAssetId, item.sortOrder,
     Number(item.enabled), itemId, weddingId,
   ).run();
   const updated = (await listStoryItems(env, weddingId, false))
@@ -677,14 +775,18 @@ async function handleLocations(
   if (request.method === 'GET' && itemId === null) {
     const result = await env.DB.prepare(
       `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
-              l.photo_media_id, l.sort_order, l.enabled,
-              m.preview_status AS photo_preview_status
+              l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status,
+              a.status AS photo_site_asset_status
        FROM wedding_locations l
        LEFT JOIN media m
          ON m.id = l.photo_media_id
         AND m.wedding_id = l.wedding_id
-        AND m.status = 'approved'
-        AND m.mime_type LIKE 'image/%'
+         AND m.status = 'approved'
+         AND m.mime_type LIKE 'image/%'
+       LEFT JOIN site_assets a
+         ON a.id = l.photo_site_asset_id
+        AND a.wedding_id = l.wedding_id
        WHERE l.wedding_id = ? ORDER BY l.sort_order, l.id`,
     ).bind(weddingId).all<LocationRow>();
     return json({ locations: result.results.map((row) => serializeLocation(row, true)) });
@@ -693,20 +795,24 @@ async function handleLocations(
   if (request.method === 'POST' && itemId === null) {
     const item = parseLocation(await requestBody(request));
     await validateApprovedImage(env, weddingId, item.photo_media_id);
+    await validateReadySiteAsset(env, weddingId, item.photo_site_asset_id);
     const result = await env.DB.prepare(
       `INSERT INTO wedding_locations
-         (wedding_id, name, type, address, maps_url, description, photo_media_id, sort_order, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (wedding_id, name, type, address, maps_url, description, photo_media_id,
+          photo_site_asset_id, sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.name, item.type, item.address, item.mapsUrl, item.description,
-      item.photo_media_id, item.sortOrder, Number(item.enabled),
+      item.photo_media_id, item.photo_site_asset_id, item.sortOrder, Number(item.enabled),
     ).run();
     const row = await env.DB.prepare(
       `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
-              l.photo_media_id, l.sort_order, l.enabled,
-              m.preview_status AS photo_preview_status
+              l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status,
+              a.status AS photo_site_asset_status
        FROM wedding_locations l
        LEFT JOIN media m ON m.id = l.photo_media_id
+       LEFT JOIN site_assets a ON a.id = l.photo_site_asset_id AND a.wedding_id = l.wedding_id
        WHERE l.id = ? AND l.wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<LocationRow>();
     return json(serializeLocation(row!, true), 201);
@@ -727,21 +833,24 @@ async function handleLocations(
 
   const item = parseLocation(await requestBody(request));
   await validateApprovedImage(env, weddingId, item.photo_media_id);
+  await validateReadySiteAsset(env, weddingId, item.photo_site_asset_id);
   await env.DB.prepare(
     `UPDATE wedding_locations
      SET name = ?, type = ?, address = ?, maps_url = ?, description = ?, photo_media_id = ?,
-         sort_order = ?, enabled = ?
+          photo_site_asset_id = ?, sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
     item.name, item.type, item.address, item.mapsUrl, item.description,
-    item.photo_media_id, item.sortOrder, Number(item.enabled), itemId, weddingId,
+    item.photo_media_id, item.photo_site_asset_id, item.sortOrder, Number(item.enabled), itemId, weddingId,
   ).run();
   const row = await env.DB.prepare(
     `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
-            l.photo_media_id, l.sort_order, l.enabled,
-            m.preview_status AS photo_preview_status
+            l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
+            m.preview_status AS photo_preview_status,
+            a.status AS photo_site_asset_status
      FROM wedding_locations l
      LEFT JOIN media m ON m.id = l.photo_media_id
+     LEFT JOIN site_assets a ON a.id = l.photo_site_asset_id AND a.wedding_id = l.wedding_id
      WHERE l.id = ? AND l.wedding_id = ?`,
   ).bind(itemId, weddingId).first<LocationRow>();
   return json(serializeLocation(row!, true));
@@ -755,7 +864,7 @@ async function handleInfo(
 ): Promise<Response> {
   if (request.method === 'GET' && itemId === null) {
     const result = await env.DB.prepare(
-      `SELECT id, wedding_id, category, title, content, sort_order, enabled
+      `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
        FROM wedding_info_items WHERE wedding_id = ? ORDER BY sort_order, id`,
     ).bind(weddingId).all<InfoRow>();
     return json({ info: result.results.map((row) => serializeInfo(row, true)) });
@@ -763,15 +872,17 @@ async function handleInfo(
 
   if (request.method === 'POST' && itemId === null) {
     const item = parseInfo(await requestBody(request));
+    await validateReadySiteAsset(env, weddingId, item.image_site_asset_id);
     const result = await env.DB.prepare(
       `INSERT INTO wedding_info_items
-         (wedding_id, category, title, content, sort_order, enabled)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (wedding_id, category, title, content, image_site_asset_id, sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
-      weddingId, item.category, item.title, item.content, item.sortOrder, Number(item.enabled),
+      weddingId, item.category, item.title, item.content, item.image_site_asset_id,
+      item.sortOrder, Number(item.enabled),
     ).run();
     const row = await env.DB.prepare(
-      `SELECT id, wedding_id, category, title, content, sort_order, enabled
+      `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
        FROM wedding_info_items WHERE id = ? AND wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<InfoRow>();
     return json(serializeInfo(row!, true), 201);
@@ -791,15 +902,17 @@ async function handleInfo(
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseInfo(await requestBody(request));
+  await validateReadySiteAsset(env, weddingId, item.image_site_asset_id);
   await env.DB.prepare(
     `UPDATE wedding_info_items
-     SET category = ?, title = ?, content = ?, sort_order = ?, enabled = ?
+     SET category = ?, title = ?, content = ?, image_site_asset_id = ?, sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
-    item.category, item.title, item.content, item.sortOrder, Number(item.enabled), itemId, weddingId,
+    item.category, item.title, item.content, item.image_site_asset_id,
+    item.sortOrder, Number(item.enabled), itemId, weddingId,
   ).run();
   const row = await env.DB.prepare(
-    `SELECT id, wedding_id, category, title, content, sort_order, enabled
+    `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
      FROM wedding_info_items WHERE id = ? AND wedding_id = ?`,
   ).bind(itemId, weddingId).first<InfoRow>();
   return json(serializeInfo(row!, true));

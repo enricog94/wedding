@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ApprovedMediaPicker, type ApprovedMedia } from './ApprovedMediaPicker';
+import { SiteAssetLibrary } from './SiteAssetLibrary';
+import { SiteAssetPicker } from './SiteAssetPicker';
+import type { SiteAsset } from './siteAssets';
 
-type ContentTab = 'wedding' | 'story' | 'schedule' | 'locations' | 'info';
+type ContentTab = 'wedding' | 'story' | 'schedule' | 'locations' | 'info' | 'siteMedia';
 
 type ContentPhoto = {
   id: number;
   thumbnailUrl: string;
   previewUrl: string;
+  source?: 'site_asset' | 'legacy_media';
 };
 
 type StoryForm = {
@@ -29,6 +32,7 @@ type StoryItem = {
   title: string;
   body: string | null;
   photoMediaId: number | null;
+  photoSiteAssetId: number | null;
   photo: ContentPhoto | null;
   sortOrder: number;
   enabled: boolean;
@@ -41,6 +45,8 @@ type WeddingForm = {
   heroEyebrow: string;
   heroTitle: string;
   heroSubtitle: string;
+  heroSiteAssetId: number | null;
+  heroPhoto: ContentPhoto | null;
 };
 
 type ScheduleItem = {
@@ -61,6 +67,7 @@ type LocationItem = {
   mapsUrl: string | null;
   description: string | null;
   photoMediaId: number | null;
+  photoSiteAssetId: number | null;
   photo: ContentPhoto | null;
   sortOrder: number;
   enabled: boolean;
@@ -71,6 +78,7 @@ type InfoItem = {
   category: string;
   title: string;
   content: string | null;
+  imageSiteAssetId: number | null;
   sortOrder: number;
   enabled: boolean;
 };
@@ -82,6 +90,7 @@ type InfoDraft = Omit<InfoItem, 'id'> & { id?: number };
 
 const EMPTY_WEDDING: WeddingForm = {
   brideName: '', groomName: '', weddingDate: '', heroEyebrow: '', heroTitle: '', heroSubtitle: '',
+  heroSiteAssetId: null, heroPhoto: null,
 };
 
 const EMPTY_STORY: StoryForm = {
@@ -99,13 +108,22 @@ const categoryLabels: Record<string, string> = {
 };
 
 async function adminRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'manual' });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'errore di rete';
+    throw new Error(`${url}: richiesta non completata (${detail}).`);
+  }
+  if (response.type === 'opaqueredirect') {
+    throw new Error(`${url}: autenticazione Cloudflare Access richiesta (redirect).`);
+  }
   if (response.status === 401 || response.status === 403) {
-    throw new Error('La sessione amministratore è scaduta. Ricarica la pagina.');
+    throw new Error(`${url}: HTTP ${response.status}. La sessione amministratore è scaduta. Ricarica la pagina.`);
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(payload?.error || 'Operazione non riuscita.');
+    throw new Error(`${url}: HTTP ${response.status}${payload?.error ? ` - ${payload.error}` : ''}`);
   }
   return response.json() as Promise<T>;
 }
@@ -144,46 +162,57 @@ export function AdminContent() {
   const [storyDraft, setStoryDraft] = useState<StoryDraft | null>(null);
   const [locationDraft, setLocationDraft] = useState<LocationDraft | null>(null);
   const [infoDraft, setInfoDraft] = useState<InfoDraft | null>(null);
-  const [pickerTarget, setPickerTarget] = useState<'storyItem' | 'location' | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<'hero' | 'storyItem' | 'location' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
+  const [loadErrors, setLoadErrors] = useState<Partial<Record<ContentTab, string>>>({});
 
   const loadContent = useCallback(async () => {
-    setLoading(true); setError('');
-    try {
-      const [weddingResult, storyResult, storyItemsResult, scheduleResult, locationsResult, infoResult] = await Promise.all([
+    setLoading(true); setError(''); setLoadErrors({});
+    const results = await Promise.allSettled([
         adminRequest<WeddingForm & { heroEyebrow: string | null; heroTitle: string | null; heroSubtitle: string | null }>('/api/admin/content/wedding'),
         adminRequest<StoryResponse>('/api/admin/home-content'),
         adminRequest<{ story: StoryItem[] }>('/api/admin/content/story'),
         adminRequest<{ schedule: ScheduleItem[] }>('/api/admin/content/schedule'),
         adminRequest<{ locations: LocationItem[] }>('/api/admin/content/locations'),
         adminRequest<{ info: InfoItem[] }>('/api/admin/content/info'),
-      ]);
+      ] as const);
+    const [weddingResult, storyResult, storyItemsResult, scheduleResult, locationsResult, infoResult] = results;
+    const nextErrors: Partial<Record<ContentTab, string>> = {};
+    const errorMessage = (result: PromiseRejectedResult) => (
+      result.reason instanceof Error ? result.reason.message : 'Richiesta non riuscita.'
+    );
+
+    if (weddingResult.status === 'fulfilled') {
       setWedding({
-        ...weddingResult,
-        heroEyebrow: weddingResult.heroEyebrow ?? '',
-        heroTitle: weddingResult.heroTitle ?? '',
-        heroSubtitle: weddingResult.heroSubtitle ?? '',
+        ...weddingResult.value,
+        heroEyebrow: weddingResult.value.heroEyebrow ?? '',
+        heroTitle: weddingResult.value.heroTitle ?? '',
+        heroSubtitle: weddingResult.value.heroSubtitle ?? '',
       });
+    } else nextErrors.wedding = errorMessage(weddingResult);
+    if (storyResult.status === 'fulfilled') {
       setStory({
-        ...storyResult,
-        storyEyebrow: storyResult.storyEyebrow ?? '',
-        storyTitle: storyResult.storyTitle ?? '',
-        storyIntro: storyResult.storyIntro ?? '',
-        storyQuote: storyResult.storyQuote ?? '',
-        storyQuoteAuthor: storyResult.storyQuoteAuthor ?? '',
+        ...storyResult.value,
+        storyEyebrow: storyResult.value.storyEyebrow ?? '',
+        storyTitle: storyResult.value.storyTitle ?? '',
+        storyIntro: storyResult.value.storyIntro ?? '',
+        storyQuote: storyResult.value.storyQuote ?? '',
+        storyQuoteAuthor: storyResult.value.storyQuoteAuthor ?? '',
       });
-      setStoryItems(sortItems(storyItemsResult.story));
-      setSchedule(sortItems(scheduleResult.schedule));
-      setLocations(sortItems(locationsResult.locations));
-      setInfo(sortItems(infoResult.info));
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Impossibile caricare i contenuti.');
-    } finally {
-      setLoading(false);
-    }
+    } else nextErrors.story = errorMessage(storyResult);
+    if (storyItemsResult.status === 'fulfilled') setStoryItems(sortItems(storyItemsResult.value.story));
+    else nextErrors.story = errorMessage(storyItemsResult);
+    if (scheduleResult.status === 'fulfilled') setSchedule(sortItems(scheduleResult.value.schedule));
+    else nextErrors.schedule = errorMessage(scheduleResult);
+    if (locationsResult.status === 'fulfilled') setLocations(sortItems(locationsResult.value.locations));
+    else nextErrors.locations = errorMessage(locationsResult);
+    if (infoResult.status === 'fulfilled') setInfo(sortItems(infoResult.value.info));
+    else nextErrors.info = errorMessage(infoResult);
+    setLoadErrors(nextErrors);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -326,19 +355,22 @@ export function AdminContent() {
     }, 'Ordine delle informazioni aggiornato.');
   };
 
-  const selectPhoto = (media: ApprovedMedia) => {
+  const selectPhoto = (asset: SiteAsset) => {
     const photo = {
-      id: media.id,
-      thumbnailUrl: media.thumbnailUrl ?? `/api/admin/media/${media.id}/thumbnail`,
-      previewUrl: `/api/admin/media/${media.id}/preview`,
+      id: asset.id,
+      thumbnailUrl: asset.viewUrl ?? `/api/admin/site-assets/${asset.id}/view`,
+      previewUrl: asset.viewUrl ?? `/api/admin/site-assets/${asset.id}/view`,
+      source: 'site_asset' as const,
     };
-    if (pickerTarget === 'storyItem') {
+    if (pickerTarget === 'hero') {
+      setWedding((current) => ({ ...current, heroSiteAssetId: asset.id, heroPhoto: photo }));
+    } else if (pickerTarget === 'storyItem') {
       setStoryDraft((current) => current
-        ? { ...current, photoMediaId: media.id, photo }
+        ? { ...current, photoMediaId: null, photoSiteAssetId: asset.id, photo }
         : current);
     } else if (pickerTarget === 'location') {
       setLocationDraft((current) => current
-        ? { ...current, photoMediaId: media.id, photo }
+        ? { ...current, photoMediaId: null, photoSiteAssetId: asset.id, photo }
         : current);
     }
     setPickerTarget(null);
@@ -346,7 +378,7 @@ export function AdminContent() {
 
   const tabs = useMemo(() => [
     ['wedding', 'Dati matrimonio'], ['story', 'La nostra storia'], ['schedule', 'Programma'],
-    ['locations', 'Location'], ['info', 'Info & FAQ'],
+    ['locations', 'Location'], ['info', 'Info & FAQ'], ['siteMedia', 'Media sito'],
   ] as const, []);
 
   if (loading) return <p className="admin-state">Caricamento contenuti…</p>;
@@ -363,6 +395,7 @@ export function AdminContent() {
       </nav>
       {feedback && <p className="admin-feedback" role="status">{feedback}</p>}
       {error && <p className="admin-state admin-state--error" role="alert">{error}</p>}
+      {loadErrors[tab] && <p className="admin-state admin-state--error" role="alert">{loadErrors[tab]}</p>}
 
       {tab === 'wedding' && (
         <form className="admin-content-form" onSubmit={(event) => { event.preventDefault(); void saveWedding(); }}>
@@ -372,6 +405,14 @@ export function AdminContent() {
           <label>Dettaglio hero<input maxLength={80} value={wedding.heroEyebrow} onChange={(event) => setWedding((current) => ({ ...current, heroEyebrow: event.target.value }))} /></label>
           <label className="admin-content-form__wide">Titolo hero opzionale<input maxLength={160} value={wedding.heroTitle} onChange={(event) => setWedding((current) => ({ ...current, heroTitle: event.target.value }))} /></label>
           <label className="admin-content-form__wide">Sottotitolo hero<textarea maxLength={300} value={wedding.heroSubtitle} onChange={(event) => setWedding((current) => ({ ...current, heroSubtitle: event.target.value }))} /></label>
+          <div className="admin-photo-field admin-content-form__wide">
+            <span>Foto hero</span>
+            {wedding.heroPhoto && <img src={wedding.heroPhoto.thumbnailUrl} alt="Anteprima hero selezionata" />}
+            <div>
+              <button type="button" onClick={() => setPickerTarget('hero')}>{wedding.heroPhoto ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
+              {wedding.heroPhoto && <button type="button" onClick={() => setWedding((current) => ({ ...current, heroSiteAssetId: null, heroPhoto: null }))}>Rimuovi foto</button>}
+            </div>
+          </div>
           <div className="admin-content-form__actions"><button type="submit" disabled={busy}>Salva dati</button></div>
         </form>
       )}
@@ -391,7 +432,7 @@ export function AdminContent() {
           <section className="admin-content-collection">
             <div className="admin-content-collection__heading">
               <div><h3>Momenti</h3><p>{storyItems.length} di 10 step</p></div>
-              <button type="button" disabled={storyItems.length >= 10} onClick={() => setStoryDraft({ yearLabel: null, title: '', body: null, photoMediaId: null, photo: null, sortOrder: nextSortOrder(storyItems), enabled: true })}>+ Aggiungi momento</button>
+              <button type="button" disabled={storyItems.length >= 10} onClick={() => setStoryDraft({ yearLabel: null, title: '', body: null, photoMediaId: null, photoSiteAssetId: null, photo: null, sortOrder: nextSortOrder(storyItems), enabled: true })}>+ Aggiungi momento</button>
             </div>
             {storyDraft && (
               <form className="admin-content-form admin-content-form--editor" onSubmit={(event) => { event.preventDefault(); void saveStoryItem(storyDraft); }}>
@@ -402,8 +443,8 @@ export function AdminContent() {
                   <span>Foto momento</span>
                   {storyDraft.photo && <img src={storyDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${storyDraft.title || 'il momento'}`} />}
                   <div>
-                    <button type="button" onClick={() => setPickerTarget('storyItem')}>{storyDraft.photoMediaId ? 'Cambia foto' : 'Seleziona foto'}</button>
-                    {storyDraft.photoMediaId && <button type="button" onClick={() => setStoryDraft({ ...storyDraft, photoMediaId: null, photo: null })}>Rimuovi foto</button>}
+                    <button type="button" onClick={() => setPickerTarget('storyItem')}>{storyDraft.photo ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
+                    {storyDraft.photo && <button type="button" onClick={() => setStoryDraft({ ...storyDraft, photoMediaId: null, photoSiteAssetId: null, photo: null })}>Rimuovi foto</button>}
                   </div>
                 </div>
                 <label>Ordine<input type="number" required value={storyDraft.sortOrder} onChange={(event) => setStoryDraft({ ...storyDraft, sortOrder: Number(event.target.value) })} /></label>
@@ -459,7 +500,7 @@ export function AdminContent() {
       )}
 
       {tab === 'locations' && (
-        <CollectionSection title="Location" addLabel="Aggiungi location" onAdd={() => setLocationDraft({ name: '', type: null, address: null, mapsUrl: null, description: null, photoMediaId: null, photo: null, sortOrder: nextSortOrder(locations), enabled: true })}>
+        <CollectionSection title="Location" addLabel="Aggiungi location" onAdd={() => setLocationDraft({ name: '', type: null, address: null, mapsUrl: null, description: null, photoMediaId: null, photoSiteAssetId: null, photo: null, sortOrder: nextSortOrder(locations), enabled: true })}>
           {locationDraft && (
             <form className="admin-content-form admin-content-form--editor" onSubmit={(event) => { event.preventDefault(); void saveLocation(locationDraft); }}>
               <label>Nome<input required maxLength={160} value={locationDraft.name} onChange={(event) => setLocationDraft({ ...locationDraft, name: event.target.value })} /></label>
@@ -471,8 +512,8 @@ export function AdminContent() {
                 <span>Foto location</span>
                 {locationDraft.photo && <img src={locationDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${locationDraft.name || 'la location'}`} />}
                 <div>
-                  <button type="button" onClick={() => setPickerTarget('location')}>{locationDraft.photoMediaId ? 'Cambia foto' : 'Seleziona foto'}</button>
-                  {locationDraft.photoMediaId && <button type="button" onClick={() => setLocationDraft({ ...locationDraft, photoMediaId: null, photo: null })}>Rimuovi foto</button>}
+                  <button type="button" onClick={() => setPickerTarget('location')}>{locationDraft.photo ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
+                  {locationDraft.photo && <button type="button" onClick={() => setLocationDraft({ ...locationDraft, photoMediaId: null, photoSiteAssetId: null, photo: null })}>Rimuovi foto</button>}
                 </div>
               </div>
               <label>Ordine<input type="number" required value={locationDraft.sortOrder} onChange={(event) => setLocationDraft({ ...locationDraft, sortOrder: Number(event.target.value) })} /></label>
@@ -490,7 +531,7 @@ export function AdminContent() {
       )}
 
       {tab === 'info' && (
-        <CollectionSection title="Info & FAQ" addLabel="Aggiungi informazione" onAdd={() => setInfoDraft({ category: 'other', title: '', content: null, sortOrder: nextSortOrder(info), enabled: true })}>
+        <CollectionSection title="Info & FAQ" addLabel="Aggiungi informazione" onAdd={() => setInfoDraft({ category: 'other', title: '', content: null, imageSiteAssetId: null, sortOrder: nextSortOrder(info), enabled: true })}>
           {infoDraft && (
             <form className="admin-content-form admin-content-form--editor" onSubmit={(event) => { event.preventDefault(); void saveInfo(infoDraft); }}>
               <label>Categoria<select value={infoDraft.category} onChange={(event) => setInfoDraft({ ...infoDraft, category: event.target.value })}>{Object.entries(categoryLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -509,9 +550,15 @@ export function AdminContent() {
           })} />
         </CollectionSection>
       )}
+      {tab === 'siteMedia' && <SiteAssetLibrary />}
       {pickerTarget && (
-        <ApprovedMediaPicker
-          selectedId={pickerTarget === 'storyItem' ? storyDraft?.photoMediaId ?? null : locationDraft?.photoMediaId ?? null}
+        <SiteAssetPicker
+          assetType={pickerTarget === 'hero' ? 'hero' : pickerTarget === 'storyItem' ? 'story' : 'location'}
+          selectedId={pickerTarget === 'hero'
+            ? wedding.heroSiteAssetId
+            : pickerTarget === 'storyItem'
+              ? storyDraft?.photoSiteAssetId ?? null
+              : locationDraft?.photoSiteAssetId ?? null}
           onSelect={selectPhoto}
           onClose={() => setPickerTarget(null)}
         />

@@ -9,6 +9,7 @@ export type Wedding = {
   heroEyebrow?: string | null;
   heroTitle?: string | null;
   heroSubtitle?: string | null;
+  heroPhoto?: PublicContentPhoto | null;
 };
 
 export type PublicScheduleItem = {
@@ -33,6 +34,7 @@ export type PublicContentPhoto = {
   id: number;
   thumbnailUrl: string;
   previewUrl: string;
+  source?: 'site_asset' | 'legacy_media';
 };
 
 export type PublicHomeContent = {

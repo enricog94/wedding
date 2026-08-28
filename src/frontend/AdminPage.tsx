@@ -35,6 +35,7 @@ type AdminMediaResponse = { media: AdminMedia[]; stats: AdminStats };
 
 type AdminSettings = {
   galleryEnabled: boolean;
+  galleryPreviewEnabled: boolean;
   guestUploadsEnabled: boolean;
   requireGuestApproval: boolean;
   photoboothAutoApprove: boolean;
@@ -50,6 +51,7 @@ const EMPTY_STATS: AdminStats = {
 
 const DEFAULT_SETTINGS: AdminSettings = {
   galleryEnabled: true,
+  galleryPreviewEnabled: true,
   guestUploadsEnabled: true,
   requireGuestApproval: true,
   photoboothAutoApprove: true,
@@ -57,6 +59,25 @@ const DEFAULT_SETTINGS: AdminSettings = {
   locationsEnabled: true,
   infoEnabled: true,
 };
+
+async function adminResponse(url: string, init?: RequestInit): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'manual' });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    const detail = error instanceof Error ? error.message : 'errore di rete';
+    throw new Error(`${url}: richiesta non completata (${detail}).`);
+  }
+  if (response.type === 'opaqueredirect') {
+    throw new Error(`${url}: autenticazione Cloudflare Access richiesta (redirect).`);
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(`${url}: HTTP ${response.status}${payload?.error ? ` - ${payload.error}` : ''}`);
+  }
+  return response;
+}
 
 const previewableTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const statusLabels: Record<MediaStatus, string> = {
@@ -135,7 +156,9 @@ export function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [mediaError, setMediaError] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [deleteAllConfirmation, setDeleteAllConfirmation] = useState('');
 
@@ -147,19 +170,15 @@ export function AdminPage() {
   const loadMedia = useCallback(async () => {
     if (tab === 'settings' || tab === 'content') return;
     setLoading(true);
-    setLoadError('');
+    setMediaError('');
     try {
-      const response = await fetch(`/api/admin/media?${query}`);
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('La sessione amministratore è scaduta. Ricarica la pagina per accedere di nuovo.');
-      }
-      if (!response.ok) throw new Error('Impossibile caricare i media.');
+      const response = await adminResponse(`/api/admin/media?${query}`);
       const result = await response.json() as AdminMediaResponse;
       setMedia(Array.isArray(result.media) ? result.media : []);
       setStats(result.stats ?? EMPTY_STATS);
       setSelected(new Set());
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : 'Impossibile caricare i media.');
+      setMediaError(error instanceof Error ? error.message : 'Impossibile caricare i media.');
     } finally {
       setLoading(false);
     }
@@ -172,14 +191,13 @@ export function AdminPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch('/api/admin/settings', { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('settings');
-        return response.json() as Promise<AdminSettings>;
-      })
+    adminResponse('/api/admin/settings', { signal: controller.signal })
+      .then((response) => response.json() as Promise<AdminSettings>)
       .then(setSettings)
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === 'AbortError')) setLoadError('Impossibile caricare le impostazioni.');
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setSettingsError(error instanceof Error ? error.message : '/api/admin/settings: richiesta non riuscita.');
+        }
       })
       .finally(() => setSettingsLoading(false));
     return () => controller.abort();
@@ -191,66 +209,61 @@ export function AdminPage() {
   };
 
   const moderate = async (id: number, action: MediaAction) => {
-    setBusy(true); setFeedback(''); setLoadError('');
+    setBusy(true); setFeedback(''); setActionError('');
     try {
-      const response = await fetch(`/api/admin/media/${id}/${action}`, { method: 'POST' });
-      if (!response.ok) throw new Error('action');
+      await adminResponse(`/api/admin/media/${id}/${action}`, { method: 'POST' });
       await finishAction('Media aggiornato correttamente.');
-    } catch { setLoadError('Operazione non riuscita. Riprova.'); }
+    } catch (error) { setActionError(error instanceof Error ? error.message : 'Operazione non riuscita. Riprova.'); }
     finally { setBusy(false); }
   };
 
   const removeMedia = async (item: AdminMedia) => {
     if (!window.confirm(`Eliminare definitivamente “${item.originalFilename || 'questo media'}”?`)) return;
-    setBusy(true); setFeedback(''); setLoadError('');
+    setBusy(true); setFeedback(''); setActionError('');
     try {
-      const response = await fetch(`/api/admin/media/${item.id}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('delete');
+      await adminResponse(`/api/admin/media/${item.id}`, { method: 'DELETE' });
       await finishAction('Media eliminato definitivamente.');
-    } catch { setLoadError('Eliminazione non riuscita. Il media non è stato rimosso.'); }
+    } catch (error) { setActionError(error instanceof Error ? error.message : 'Eliminazione non riuscita. Il media non è stato rimosso.'); }
     finally { setBusy(false); }
   };
 
   const bulkAction = async (action: BulkAction, ids = [...selected]) => {
     if (ids.length === 0) return;
     if (action === 'delete' && !window.confirm(`Eliminare definitivamente ${ids.length} media selezionati?`)) return;
-    setBusy(true); setFeedback(''); setLoadError('');
+    setBusy(true); setFeedback(''); setActionError('');
     try {
-      const response = await fetch('/api/admin/media/bulk', {
+      await adminResponse('/api/admin/media/bulk', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids }),
       });
-      if (!response.ok) throw new Error('bulk');
       await finishAction(action === 'delete' ? 'Media selezionati eliminati.' : 'Media selezionati aggiornati.');
-    } catch { setLoadError('Operazione multipla non riuscita. Riprova.'); }
+    } catch (error) { setActionError(error instanceof Error ? error.message : 'Operazione multipla non riuscita. Riprova.'); }
     finally { setBusy(false); }
   };
 
   const saveSettings = async () => {
-    setBusy(true); setFeedback(''); setLoadError('');
+    setBusy(true); setFeedback(''); setSettingsError('');
     try {
-      const response = await fetch('/api/admin/settings', {
+      const response = await adminResponse('/api/admin/settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
       });
-      if (!response.ok) throw new Error('settings');
       setSettings(await response.json() as AdminSettings);
       setFeedback('Impostazioni salvate.');
-    } catch { setLoadError('Salvataggio delle impostazioni non riuscito.'); }
+    } catch (error) { setSettingsError(error instanceof Error ? error.message : 'Salvataggio delle impostazioni non riuscito.'); }
     finally { setBusy(false); }
   };
 
   const deleteAll = async () => {
     if (deleteAllConfirmation !== 'ELIMINA TUTTO') return;
-    setBusy(true); setFeedback(''); setLoadError('');
+    setBusy(true); setFeedback(''); setActionError('');
     try {
-      const response = await fetch('/api/admin/media', {
+      const response = await adminResponse('/api/admin/media', {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmation: deleteAllConfirmation }),
       });
-      if (!response.ok) throw new Error('delete-all');
       const result = await response.json() as { deleted: number };
       setDeleteAllConfirmation(''); setStats(EMPTY_STATS); setMedia([]);
       setFeedback(`${result.deleted} media eliminati definitivamente.`);
-    } catch { setLoadError('Eliminazione completa non riuscita. I dati rimasti non sono stati nascosti dalla UI.'); }
+    } catch { setActionError('Eliminazione completa non riuscita. I dati rimasti non sono stati nascosti dalla UI.'); }
     finally { setBusy(false); }
   };
 
@@ -269,7 +282,7 @@ export function AdminPage() {
         <span className="admin-count" aria-label={`${stats.total} media totali`}>{stats.total}</span>
       </header>
 
-      {tab === 'dashboard' && (
+      {tab === 'dashboard' && !loading && !mediaError && (
         <section className="admin-dashboard" aria-label="Riepilogo media">
           {[
             ['Media totali', stats.total], ['Da approvare', stats.pending], ['Approvati', stats.approved],
@@ -287,7 +300,9 @@ export function AdminPage() {
       </nav>
 
       {feedback && <p className="admin-feedback" role="status">{feedback}</p>}
-      {loadError && <p className="admin-state admin-state--error" role="alert">{loadError}</p>}
+      {actionError && <p className="admin-state admin-state--error" role="alert">{actionError}</p>}
+      {(tab === 'dashboard' || tab === 'gallery') && mediaError && <p className="admin-state admin-state--error" role="alert">{mediaError}</p>}
+      {tab === 'settings' && settingsError && <p className="admin-state admin-state--error" role="alert">{settingsError}</p>}
 
       {(tab === 'dashboard' || tab === 'gallery') && (
         <>
@@ -322,7 +337,7 @@ export function AdminPage() {
           )}
 
           {loading && <p className="admin-state">Caricamento media…</p>}
-          {!loading && !loadError && media.length === 0 && <div className="admin-empty"><span aria-hidden="true">✓</span><p>Nessun media in questa sezione.</p></div>}
+          {!loading && !mediaError && media.length === 0 && <div className="admin-empty"><span aria-hidden="true">✓</span><p>Nessun media in questa sezione.</p></div>}
 
           {media.length > 0 && !loading && (
             <section className="admin-grid" aria-label={tab === 'dashboard' ? 'Media da approvare' : 'Tutti i media'}>
@@ -357,6 +372,7 @@ export function AdminPage() {
           <div className="admin-settings__heading"><div><p>Configurazione</p><h2 id="admin-settings-title">Impostazioni</h2></div><button type="button" disabled={busy || settingsLoading} onClick={() => void saveSettings()}>Salva impostazioni</button></div>
           <div className="admin-settings__toggles">
             <SettingsToggle label="Gallery pubblica" description="Rende visibili gallery e media approvati sul sito pubblico." checked={settings.galleryEnabled} disabled={busy || settingsLoading} onChange={(galleryEnabled) => setSettings((current) => ({ ...current, galleryEnabled }))} />
+            <SettingsToggle label="Gallery preview Home" description="Mostra nella Home una selezione automatica dei media approvati." checked={settings.galleryPreviewEnabled} disabled={busy || settingsLoading} onChange={(galleryPreviewEnabled) => setSettings((current) => ({ ...current, galleryPreviewEnabled }))} />
             <SettingsToggle label="Upload invitati" description="Consente agli invitati di caricare foto e video dalla pagina Foto." checked={settings.guestUploadsEnabled} disabled={busy || settingsLoading} onChange={(guestUploadsEnabled) => setSettings((current) => ({ ...current, guestUploadsEnabled }))} />
             <SettingsToggle label="Richiedi approvazione upload" description="Se attivo, i contenuti degli invitati devono essere approvati prima di comparire nella gallery." checked={settings.requireGuestApproval} disabled={busy || settingsLoading} onChange={(requireGuestApproval) => setSettings((current) => ({ ...current, requireGuestApproval }))} />
             <SettingsToggle label="Auto-approva Photobooth" description="Predispone l'approvazione automatica dei futuri media provenienti dal Photobooth." checked={settings.photoboothAutoApprove} disabled={busy || settingsLoading} onChange={(photoboothAutoApprove) => setSettings((current) => ({ ...current, photoboothAutoApprove }))} />
