@@ -26,6 +26,29 @@ export type PublicLocation = {
   address: string | null;
   mapsUrl: string | null;
   description: string | null;
+  photo: PublicContentPhoto | null;
+};
+
+export type PublicContentPhoto = {
+  id: number;
+  thumbnailUrl: string;
+  previewUrl: string;
+};
+
+export type PublicHomeContent = {
+  storyEnabled: boolean;
+  storyEyebrow: string | null;
+  storyTitle: string | null;
+  storyIntro: string | null;
+  storyQuote: string | null;
+  storyQuoteAuthor: string | null;
+  storyItems: Array<{
+    id: number;
+    yearLabel: string | null;
+    title: string;
+    body: string | null;
+    photo: PublicContentPhoto | null;
+  }>;
 };
 
 export type PublicInfoItem = {
@@ -43,6 +66,7 @@ export type WeddingContent = {
       infoEnabled: boolean;
     };
   };
+  home: PublicHomeContent;
   schedule: PublicScheduleItem[];
   locations: PublicLocation[];
   info: PublicInfoItem[];
@@ -70,6 +94,15 @@ export const DEFAULT_WEDDING_CONTENT: WeddingContent = {
       locationsEnabled: false,
       infoEnabled: false,
     },
+  },
+  home: {
+    storyEnabled: false,
+    storyEyebrow: null,
+    storyTitle: null,
+    storyIntro: null,
+    storyQuote: null,
+    storyQuoteAuthor: null,
+    storyItems: [],
   },
   schedule: [],
   locations: [],
@@ -129,6 +162,9 @@ export async function getWeddingContent(signal?: AbortSignal): Promise<WeddingCo
   }
   return {
     wedding: content.wedding,
+    home: content.home && typeof content.home === 'object'
+      ? content.home
+      : DEFAULT_WEDDING_CONTENT.home,
     schedule: Array.isArray(content.schedule) ? content.schedule : [],
     locations: Array.isArray(content.locations) ? content.locations : [],
     info: Array.isArray(content.info) ? content.info : [],

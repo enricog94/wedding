@@ -1,6 +1,38 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ApprovedMediaPicker, type ApprovedMedia } from './ApprovedMediaPicker';
 
-type ContentTab = 'wedding' | 'schedule' | 'locations' | 'info';
+type ContentTab = 'wedding' | 'story' | 'schedule' | 'locations' | 'info';
+
+type ContentPhoto = {
+  id: number;
+  thumbnailUrl: string;
+  previewUrl: string;
+};
+
+type StoryForm = {
+  storyEnabled: boolean;
+  storyEyebrow: string;
+  storyTitle: string;
+  storyIntro: string;
+  storyQuote: string;
+  storyQuoteAuthor: string;
+};
+
+type StoryTextKey =
+  | 'storyEyebrow' | 'storyTitle' | 'storyIntro' | 'storyQuote' | 'storyQuoteAuthor';
+
+type StoryResponse = Omit<StoryForm, StoryTextKey> & Record<StoryTextKey, string | null>;
+
+type StoryItem = {
+  id: number;
+  yearLabel: string | null;
+  title: string;
+  body: string | null;
+  photoMediaId: number | null;
+  photo: ContentPhoto | null;
+  sortOrder: number;
+  enabled: boolean;
+};
 
 type WeddingForm = {
   brideName: string;
@@ -28,6 +60,8 @@ type LocationItem = {
   address: string | null;
   mapsUrl: string | null;
   description: string | null;
+  photoMediaId: number | null;
+  photo: ContentPhoto | null;
   sortOrder: number;
   enabled: boolean;
 };
@@ -42,11 +76,21 @@ type InfoItem = {
 };
 
 type ScheduleDraft = Omit<ScheduleItem, 'id'> & { id?: number };
+type StoryDraft = Omit<StoryItem, 'id'> & { id?: number };
 type LocationDraft = Omit<LocationItem, 'id'> & { id?: number };
 type InfoDraft = Omit<InfoItem, 'id'> & { id?: number };
 
 const EMPTY_WEDDING: WeddingForm = {
   brideName: '', groomName: '', weddingDate: '', heroEyebrow: '', heroTitle: '', heroSubtitle: '',
+};
+
+const EMPTY_STORY: StoryForm = {
+  storyEnabled: false,
+  storyEyebrow: '',
+  storyTitle: '',
+  storyIntro: '',
+  storyQuote: '',
+  storyQuoteAuthor: '',
 };
 
 const categoryLabels: Record<string, string> = {
@@ -91,12 +135,16 @@ function EditorActions({ busy, onCancel }: EditorActionsProps) {
 export function AdminContent() {
   const [tab, setTab] = useState<ContentTab>('wedding');
   const [wedding, setWedding] = useState<WeddingForm>(EMPTY_WEDDING);
+  const [story, setStory] = useState<StoryForm>(EMPTY_STORY);
+  const [storyItems, setStoryItems] = useState<StoryItem[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [info, setInfo] = useState<InfoItem[]>([]);
   const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft | null>(null);
+  const [storyDraft, setStoryDraft] = useState<StoryDraft | null>(null);
   const [locationDraft, setLocationDraft] = useState<LocationDraft | null>(null);
   const [infoDraft, setInfoDraft] = useState<InfoDraft | null>(null);
+  const [pickerTarget, setPickerTarget] = useState<'storyItem' | 'location' | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -105,8 +153,10 @@ export function AdminContent() {
   const loadContent = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [weddingResult, scheduleResult, locationsResult, infoResult] = await Promise.all([
+      const [weddingResult, storyResult, storyItemsResult, scheduleResult, locationsResult, infoResult] = await Promise.all([
         adminRequest<WeddingForm & { heroEyebrow: string | null; heroTitle: string | null; heroSubtitle: string | null }>('/api/admin/content/wedding'),
+        adminRequest<StoryResponse>('/api/admin/home-content'),
+        adminRequest<{ story: StoryItem[] }>('/api/admin/content/story'),
         adminRequest<{ schedule: ScheduleItem[] }>('/api/admin/content/schedule'),
         adminRequest<{ locations: LocationItem[] }>('/api/admin/content/locations'),
         adminRequest<{ info: InfoItem[] }>('/api/admin/content/info'),
@@ -117,6 +167,15 @@ export function AdminContent() {
         heroTitle: weddingResult.heroTitle ?? '',
         heroSubtitle: weddingResult.heroSubtitle ?? '',
       });
+      setStory({
+        ...storyResult,
+        storyEyebrow: storyResult.storyEyebrow ?? '',
+        storyTitle: storyResult.storyTitle ?? '',
+        storyIntro: storyResult.storyIntro ?? '',
+        storyQuote: storyResult.storyQuote ?? '',
+        storyQuoteAuthor: storyResult.storyQuoteAuthor ?? '',
+      });
+      setStoryItems(sortItems(storyItemsResult.story));
       setSchedule(sortItems(scheduleResult.schedule));
       setLocations(sortItems(locationsResult.locations));
       setInfo(sortItems(infoResult.info));
@@ -152,6 +211,29 @@ export function AdminContent() {
     setWedding({ ...saved, heroEyebrow: saved.heroEyebrow ?? '', heroTitle: saved.heroTitle ?? '', heroSubtitle: saved.heroSubtitle ?? '' });
   }, 'Dati del matrimonio salvati.');
 
+  const saveStory = () => run(async () => {
+    const saved = await adminRequest<StoryResponse>(
+      '/api/admin/home-content',
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(story) },
+    );
+    setStory({
+      ...saved,
+      storyEyebrow: saved.storyEyebrow ?? '',
+      storyTitle: saved.storyTitle ?? '',
+      storyIntro: saved.storyIntro ?? '',
+      storyQuote: saved.storyQuote ?? '',
+      storyQuoteAuthor: saved.storyQuoteAuthor ?? '',
+    });
+  }, 'La nostra storia è stata salvata.');
+
+  const saveStoryItem = (draft: StoryDraft) => run(async () => {
+    await adminRequest<StoryItem>(
+      draft.id ? `/api/admin/content/story/${draft.id}` : '/api/admin/content/story',
+      { method: draft.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) },
+    );
+    setStoryDraft(null); await loadContent();
+  }, 'Momento della storia aggiornato.');
+
   const saveSchedule = (draft: ScheduleDraft) => run(async () => {
     await adminRequest<ScheduleItem>(
       draft.id ? `/api/admin/content/schedule/${draft.id}` : '/api/admin/content/schedule',
@@ -182,6 +264,27 @@ export function AdminContent() {
       await adminRequest<{ deleted: true }>(`/api/admin/content/${kind}/${id}`, { method: 'DELETE' });
       await loadContent();
     }, 'Contenuto eliminato.');
+  };
+
+  const removeStoryItem = (item: StoryItem) => {
+    if (!window.confirm(`Eliminare definitivamente “${item.title}”?`)) return;
+    void run(async () => {
+      await adminRequest<{ deleted: true }>(`/api/admin/content/story/${item.id}`, { method: 'DELETE' });
+      await loadContent();
+    }, 'Momento eliminato.');
+  };
+
+  const moveStoryItem = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= storyItems.length) return;
+    const current = storyItems[index]; const other = storyItems[target];
+    void run(async () => {
+      await Promise.all([
+        adminRequest(`/api/admin/content/story/${current.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...current, sortOrder: other.sortOrder }) }),
+        adminRequest(`/api/admin/content/story/${other.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...other, sortOrder: current.sortOrder }) }),
+      ]);
+      await loadContent();
+    }, 'Ordine della storia aggiornato.');
   };
 
   const moveSchedule = (index: number, direction: -1 | 1) => {
@@ -223,8 +326,27 @@ export function AdminContent() {
     }, 'Ordine delle informazioni aggiornato.');
   };
 
+  const selectPhoto = (media: ApprovedMedia) => {
+    const photo = {
+      id: media.id,
+      thumbnailUrl: media.thumbnailUrl ?? `/api/admin/media/${media.id}/thumbnail`,
+      previewUrl: `/api/admin/media/${media.id}/preview`,
+    };
+    if (pickerTarget === 'storyItem') {
+      setStoryDraft((current) => current
+        ? { ...current, photoMediaId: media.id, photo }
+        : current);
+    } else if (pickerTarget === 'location') {
+      setLocationDraft((current) => current
+        ? { ...current, photoMediaId: media.id, photo }
+        : current);
+    }
+    setPickerTarget(null);
+  };
+
   const tabs = useMemo(() => [
-    ['wedding', 'Dati matrimonio'], ['schedule', 'Programma'], ['locations', 'Location'], ['info', 'Info & FAQ'],
+    ['wedding', 'Dati matrimonio'], ['story', 'La nostra storia'], ['schedule', 'Programma'],
+    ['locations', 'Location'], ['info', 'Info & FAQ'],
   ] as const, []);
 
   if (loading) return <p className="admin-state">Caricamento contenuti…</p>;
@@ -254,6 +376,66 @@ export function AdminContent() {
         </form>
       )}
 
+      {tab === 'story' && (
+        <div className="admin-story-editor">
+          <form className="admin-content-form" onSubmit={(event) => { event.preventDefault(); void saveStory(); }}>
+            <label className="admin-content-check admin-content-form__wide"><input type="checkbox" checked={story.storyEnabled} onChange={(event) => setStory((current) => ({ ...current, storyEnabled: event.target.checked }))} /> Mostra sezione</label>
+            <label>Eyebrow<input maxLength={80} value={story.storyEyebrow} onChange={(event) => setStory((current) => ({ ...current, storyEyebrow: event.target.value }))} /></label>
+            <label>Titolo<input maxLength={160} value={story.storyTitle} onChange={(event) => setStory((current) => ({ ...current, storyTitle: event.target.value }))} /></label>
+            <label className="admin-content-form__wide">Intro<textarea maxLength={2000} value={story.storyIntro} onChange={(event) => setStory((current) => ({ ...current, storyIntro: event.target.value }))} /></label>
+            <label className="admin-content-form__wide">Citazione<textarea maxLength={1200} value={story.storyQuote} onChange={(event) => setStory((current) => ({ ...current, storyQuote: event.target.value }))} /></label>
+            <label className="admin-content-form__wide">Autore citazione<input maxLength={160} value={story.storyQuoteAuthor} onChange={(event) => setStory((current) => ({ ...current, storyQuoteAuthor: event.target.value }))} /></label>
+            <div className="admin-content-form__actions"><button type="submit" disabled={busy}>Salva dati sezione</button></div>
+          </form>
+
+          <section className="admin-content-collection">
+            <div className="admin-content-collection__heading">
+              <div><h3>Momenti</h3><p>{storyItems.length} di 10 step</p></div>
+              <button type="button" disabled={storyItems.length >= 10} onClick={() => setStoryDraft({ yearLabel: null, title: '', body: null, photoMediaId: null, photo: null, sortOrder: nextSortOrder(storyItems), enabled: true })}>+ Aggiungi momento</button>
+            </div>
+            {storyDraft && (
+              <form className="admin-content-form admin-content-form--editor" onSubmit={(event) => { event.preventDefault(); void saveStoryItem(storyDraft); }}>
+                <label>Anno / periodo<input required maxLength={40} value={storyDraft.yearLabel ?? ''} onChange={(event) => setStoryDraft({ ...storyDraft, yearLabel: event.target.value })} /></label>
+                <label>Titolo<input required maxLength={160} value={storyDraft.title} onChange={(event) => setStoryDraft({ ...storyDraft, title: event.target.value })} /></label>
+                <label className="admin-content-form__wide">Testo<textarea maxLength={5000} value={storyDraft.body ?? ''} onChange={(event) => setStoryDraft({ ...storyDraft, body: event.target.value })} /></label>
+                <div className="admin-photo-field admin-content-form__wide">
+                  <span>Foto momento</span>
+                  {storyDraft.photo && <img src={storyDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${storyDraft.title || 'il momento'}`} />}
+                  <div>
+                    <button type="button" onClick={() => setPickerTarget('storyItem')}>{storyDraft.photoMediaId ? 'Cambia foto' : 'Seleziona foto'}</button>
+                    {storyDraft.photoMediaId && <button type="button" onClick={() => setStoryDraft({ ...storyDraft, photoMediaId: null, photo: null })}>Rimuovi foto</button>}
+                  </div>
+                </div>
+                <label>Ordine<input type="number" required value={storyDraft.sortOrder} onChange={(event) => setStoryDraft({ ...storyDraft, sortOrder: Number(event.target.value) })} /></label>
+                <label className="admin-content-check"><input type="checkbox" checked={storyDraft.enabled} onChange={(event) => setStoryDraft({ ...storyDraft, enabled: event.target.checked })} /> Visibile</label>
+                <EditorActions busy={busy} onCancel={() => setStoryDraft(null)} />
+              </form>
+            )}
+            {storyItems.length === 0 ? <p className="admin-content-empty">Nessun momento inserito.</p> : (
+              <div className="admin-story-list">
+                {storyItems.map((item, index) => (
+                  <article key={item.id} className={item.photo ? 'has-photo' : ''}>
+                    {item.photo && <img src={item.photo.thumbnailUrl} alt="" loading="lazy" decoding="async" />}
+                    <div className="admin-story-list__content">
+                      <span data-enabled={item.enabled}>{item.enabled ? 'Visibile' : 'Nascosto'} · Step {index + 1}</span>
+                      {item.yearLabel && <p>{item.yearLabel}</p>}
+                      <h4>{item.title}</h4>
+                    </div>
+                    <div className="admin-content-list__actions">
+                      <button type="button" onClick={() => setStoryDraft({ ...item })}>Modifica</button>
+                      <button type="button" onClick={() => void saveStoryItem({ ...item, enabled: !item.enabled })}>{item.enabled ? 'Nascondi' : 'Mostra'}</button>
+                      <button type="button" disabled={index === 0} onClick={() => moveStoryItem(index, -1)}>Sposta su</button>
+                      <button type="button" disabled={index === storyItems.length - 1} onClick={() => moveStoryItem(index, 1)}>Sposta giù</button>
+                      <button type="button" className="admin-danger" onClick={() => removeStoryItem(item)}>Elimina</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       {tab === 'schedule' && (
         <CollectionSection title="Programma" addLabel="Aggiungi evento" onAdd={() => setScheduleDraft({ timeLabel: '', title: '', subtitle: null, description: null, sortOrder: nextSortOrder(schedule), enabled: true })}>
           {scheduleDraft && (
@@ -277,7 +459,7 @@ export function AdminContent() {
       )}
 
       {tab === 'locations' && (
-        <CollectionSection title="Location" addLabel="Aggiungi location" onAdd={() => setLocationDraft({ name: '', type: null, address: null, mapsUrl: null, description: null, sortOrder: nextSortOrder(locations), enabled: true })}>
+        <CollectionSection title="Location" addLabel="Aggiungi location" onAdd={() => setLocationDraft({ name: '', type: null, address: null, mapsUrl: null, description: null, photoMediaId: null, photo: null, sortOrder: nextSortOrder(locations), enabled: true })}>
           {locationDraft && (
             <form className="admin-content-form admin-content-form--editor" onSubmit={(event) => { event.preventDefault(); void saveLocation(locationDraft); }}>
               <label>Nome<input required maxLength={160} value={locationDraft.name} onChange={(event) => setLocationDraft({ ...locationDraft, name: event.target.value })} /></label>
@@ -285,6 +467,14 @@ export function AdminContent() {
               <label className="admin-content-form__wide">Indirizzo<input maxLength={240} value={locationDraft.address ?? ''} onChange={(event) => setLocationDraft({ ...locationDraft, address: event.target.value })} /></label>
               <label className="admin-content-form__wide">Google/Apple Maps URL<input type="url" pattern="https://.*" maxLength={500} value={locationDraft.mapsUrl ?? ''} onChange={(event) => setLocationDraft({ ...locationDraft, mapsUrl: event.target.value })} /></label>
               <label className="admin-content-form__wide">Descrizione<textarea maxLength={1200} value={locationDraft.description ?? ''} onChange={(event) => setLocationDraft({ ...locationDraft, description: event.target.value })} /></label>
+              <div className="admin-photo-field admin-content-form__wide">
+                <span>Foto location</span>
+                {locationDraft.photo && <img src={locationDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${locationDraft.name || 'la location'}`} />}
+                <div>
+                  <button type="button" onClick={() => setPickerTarget('location')}>{locationDraft.photoMediaId ? 'Cambia foto' : 'Seleziona foto'}</button>
+                  {locationDraft.photoMediaId && <button type="button" onClick={() => setLocationDraft({ ...locationDraft, photoMediaId: null, photo: null })}>Rimuovi foto</button>}
+                </div>
+              </div>
               <label>Ordine<input type="number" required value={locationDraft.sortOrder} onChange={(event) => setLocationDraft({ ...locationDraft, sortOrder: Number(event.target.value) })} /></label>
               <label className="admin-content-check"><input type="checkbox" checked={locationDraft.enabled} onChange={(event) => setLocationDraft({ ...locationDraft, enabled: event.target.checked })} /> Visibile</label>
               <EditorActions busy={busy} onCancel={() => setLocationDraft(null)} />
@@ -318,6 +508,13 @@ export function AdminContent() {
             onDelete: () => removeItem('info', item.id, item.title),
           })} />
         </CollectionSection>
+      )}
+      {pickerTarget && (
+        <ApprovedMediaPicker
+          selectedId={pickerTarget === 'storyItem' ? storyDraft?.photoMediaId ?? null : locationDraft?.photoMediaId ?? null}
+          onSelect={selectPhoto}
+          onClose={() => setPickerTarget(null)}
+        />
       )}
     </section>
   );

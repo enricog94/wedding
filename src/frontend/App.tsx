@@ -59,7 +59,8 @@ export function App() {
     return () => controller.abort();
   }, []);
 
-  const { wedding, schedule, locations, info } = content;
+  const { wedding, home, schedule, locations, info } = content;
+  const showStory = home.storyEnabled;
   const showSchedule = wedding.sections.scheduleEnabled && schedule.length > 0;
   const showLocations = wedding.sections.locationsEnabled && locations.length > 0;
   const showInfo = wedding.sections.infoEnabled && info.length > 0;
@@ -132,22 +133,35 @@ export function App() {
           </section>
         </div>
 
-        {/* M5.7: NOI / LA NOSTRA STORIA */}
-        <Section id="noi" tone="paper" className="story-section">
-          <SectionTitle eyebrow="Noi" title="La nostra storia" align="center" />
-          <div className="story-grid">
-            <FadeIn delay={100} className="story-text">
-              <h3>Come è iniziata</h3>
-              <p>Un breve racconto su come ci siamo incontrati, le prime uscite, i momenti in cui abbiamo capito di voler costruire qualcosa di grande insieme. Questo è un testo placeholder che lascerà spazio alle vostre vere emozioni.</p>
-
-              <h3 className="story-text--mt">La proposta</h3>
-              <p>Il racconto del momento in cui tutto è cambiato. Le parole dette, l'emozione, il "Sì" che ci ha portato a organizzare questa giornata meravigliosa che vogliamo condividere con voi.</p>
-            </FadeIn>
-            <FadeIn delay={300} className="story-image">
-              <div className="story-image__placeholder"></div>
-            </FadeIn>
-          </div>
-        </Section>
+        {showStory && (
+          <Section id="noi" tone="paper" className="story-section">
+            <SectionTitle eyebrow={home.storyEyebrow ?? ''} title={home.storyTitle ?? ''} align="center" />
+            {home.storyIntro && <p className="story-intro">{home.storyIntro}</p>}
+            {home.storyQuote && (
+              <blockquote className="story-quote">
+                <p>{home.storyQuote}</p>
+                {home.storyQuoteAuthor && <cite>{home.storyQuoteAuthor}</cite>}
+              </blockquote>
+            )}
+            <div className="story-timeline">
+              {home.storyItems.map((item, index) => (
+                <FadeIn key={item.id} delay={Math.min(index * 100, 400)} className={`story-moment${index % 2 === 1 ? ' story-moment--reverse' : ''}${item.photo ? '' : ' story-moment--without-photo'}`}>
+                  {item.photo && (
+                    <figure className="story-moment__media">
+                      <img src={item.photo.previewUrl} alt={item.title} loading="lazy" decoding="async" />
+                      {item.yearLabel && <figcaption>{item.yearLabel}</figcaption>}
+                    </figure>
+                  )}
+                  <div className="story-moment__text">
+                    {!item.photo && item.yearLabel && <p className="story-moment__year">{item.yearLabel}</p>}
+                    <h3>{item.title}</h3>
+                    {item.body && <p>{item.body}</p>}
+                  </div>
+                </FadeIn>
+              ))}
+            </div>
+          </Section>
+        )}
 
         {showSchedule && (
           <Section id="programma" tone="paper" className="program-section">
@@ -169,8 +183,16 @@ export function App() {
             <SectionTitle eyebrow="I luoghi" title="Location" align="center" />
             <div className="location-grid location-grid--editorial">
               {locations.map((location, index) => (
-                <FadeIn key={location.id} delay={index * 150} className="location-editorial">
-                  <div className="location-editorial__image-placeholder"></div>
+                <FadeIn key={location.id} delay={index * 150} className={`location-editorial${location.photo ? '' : ' location-editorial--without-image'}`}>
+                  {location.photo && (
+                    <img
+                      className="location-editorial__image"
+                      src={location.photo.previewUrl}
+                      alt={location.name}
+                      loading="lazy"
+                      decoding="async"
+                    />
+                  )}
                   <div className="location-editorial__content">
                     <LocationCard
                       number={String(index + 1).padStart(2, '0')}

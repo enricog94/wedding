@@ -41,8 +41,32 @@ type LocationRow = {
   address: string | null;
   maps_url: string | null;
   description: string | null;
+  photo_media_id: number | null;
   sort_order: number;
   enabled: number;
+  photo_preview_status?: string | null;
+};
+
+type HomeContentRow = {
+  wedding_id: number;
+  story_enabled: number;
+  story_eyebrow: string | null;
+  story_title: string | null;
+  story_intro: string | null;
+  story_quote: string | null;
+  story_quote_author: string | null;
+};
+
+type StoryItemRow = {
+  id: number;
+  wedding_id: number;
+  year_label: string | null;
+  title: string;
+  body: string | null;
+  photo_media_id: number | null;
+  sort_order: number;
+  enabled: number;
+  photo_preview_status?: string | null;
 };
 
 type InfoRow = {
@@ -60,10 +84,28 @@ type ScheduleInput = Omit<ScheduleRow, 'id' | 'wedding_id' | 'enabled' | 'sort_o
   sortOrder: number;
 };
 
-type LocationInput = Omit<LocationRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order' | 'maps_url'> & {
+type LocationInput = Omit<LocationRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order' | 'maps_url' | 'photo_preview_status'> & {
   mapsUrl: string | null;
   enabled: boolean;
   sortOrder: number;
+};
+
+type HomeContentInput = {
+  storyEnabled: boolean;
+  storyEyebrow: string | null;
+  storyTitle: string | null;
+  storyIntro: string | null;
+  storyQuote: string | null;
+  storyQuoteAuthor: string | null;
+};
+
+type StoryItemInput = {
+  yearLabel: string;
+  title: string;
+  body: string | null;
+  photoMediaId: number | null;
+  sortOrder: number;
+  enabled: boolean;
 };
 
 type InfoInput = Omit<InfoRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order'> & {
@@ -133,6 +175,15 @@ function requiredSortOrder(input: Record<string, unknown>): number {
   return value as number;
 }
 
+function optionalPositiveInteger(input: Record<string, unknown>, key: string): number | null {
+  const value = input[key];
+  if (value === null || value === undefined || value === '') return null;
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new ValidationError(`${key} must be a positive integer or null`);
+  }
+  return value as number;
+}
+
 function isValidDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
@@ -178,6 +229,13 @@ function serializeSchedule(row: ScheduleRow, admin = false) {
 }
 
 function serializeLocation(row: LocationRow, admin = false) {
+  const photo = row.photo_media_id && row.photo_preview_status === 'ready'
+    ? {
+        id: row.photo_media_id,
+        thumbnailUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/thumbnail`,
+        previewUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/preview`,
+      }
+    : null;
   return {
     id: row.id,
     name: row.name,
@@ -185,7 +243,54 @@ function serializeLocation(row: LocationRow, admin = false) {
     address: row.address,
     mapsUrl: row.maps_url,
     description: row.description,
+    photo,
+    ...(admin ? { photoMediaId: row.photo_media_id } : {}),
     ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled === 1 } : {}),
+  };
+}
+
+function serializeStoryItem(row: StoryItemRow, admin = false) {
+  const photo = row.photo_media_id && row.photo_preview_status === 'ready'
+    ? {
+        id: row.photo_media_id,
+        thumbnailUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/thumbnail`,
+        previewUrl: `${admin ? '/api/admin' : '/api'}/media/${row.photo_media_id}/preview`,
+      }
+    : null;
+  return {
+    id: row.id,
+    yearLabel: row.year_label,
+    title: row.title,
+    body: row.body,
+    photo,
+    ...(admin ? {
+      photoMediaId: row.photo_media_id,
+      sortOrder: row.sort_order,
+      enabled: row.enabled === 1,
+    } : {}),
+  };
+}
+
+function serializeHomeContent(row: HomeContentRow | null, items: StoryItemRow[] = []) {
+  return {
+    storyEnabled: row?.story_enabled === 1,
+    storyEyebrow: row?.story_eyebrow ?? null,
+    storyTitle: row?.story_title ?? null,
+    storyIntro: row?.story_intro ?? null,
+    storyQuote: row?.story_quote ?? null,
+    storyQuoteAuthor: row?.story_quote_author ?? null,
+    storyItems: items.map((item) => serializeStoryItem(item)),
+  };
+}
+
+function serializeHomeContentAdmin(row: HomeContentRow | null) {
+  return {
+    storyEnabled: row?.story_enabled === 1,
+    storyEyebrow: row?.story_eyebrow ?? null,
+    storyTitle: row?.story_title ?? null,
+    storyIntro: row?.story_intro ?? null,
+    storyQuote: row?.story_quote ?? null,
+    storyQuoteAuthor: row?.story_quote_author ?? null,
   };
 }
 
@@ -243,6 +348,29 @@ function parseLocation(input: Record<string, unknown>): LocationInput {
     address: optionalString(input, 'address', 240),
     mapsUrl: optionalHttpsUrl(input, 'mapsUrl'),
     description: optionalString(input, 'description', 1200),
+    photo_media_id: optionalPositiveInteger(input, 'photoMediaId'),
+    sortOrder: requiredSortOrder(input),
+    enabled: requiredBoolean(input, 'enabled'),
+  };
+}
+
+function parseHomeContent(input: Record<string, unknown>): HomeContentInput {
+  return {
+    storyEnabled: requiredBoolean(input, 'storyEnabled'),
+    storyEyebrow: optionalString(input, 'storyEyebrow', 80),
+    storyTitle: optionalString(input, 'storyTitle', 160),
+    storyIntro: optionalString(input, 'storyIntro', 2000),
+    storyQuote: optionalString(input, 'storyQuote', 1200),
+    storyQuoteAuthor: optionalString(input, 'storyQuoteAuthor', 160),
+  };
+}
+
+function parseStoryItem(input: Record<string, unknown>): StoryItemInput {
+  return {
+    yearLabel: requiredString(input, 'yearLabel', 40),
+    title: requiredString(input, 'title', 160),
+    body: optionalString(input, 'body', 5000),
+    photoMediaId: optionalPositiveInteger(input, 'photoMediaId'),
     sortOrder: requiredSortOrder(input),
     enabled: requiredBoolean(input, 'enabled'),
   };
@@ -260,12 +388,60 @@ function parseInfo(input: Record<string, unknown>): InfoInput {
   };
 }
 
+async function validateApprovedImage(
+  env: ContentEnv,
+  weddingId: number,
+  mediaId: number | null,
+): Promise<void> {
+  if (mediaId === null) return;
+  const media = await env.DB.prepare(
+    `SELECT id
+     FROM media
+     WHERE id = ? AND wedding_id = ? AND status = 'approved'
+       AND mime_type LIKE 'image/%' AND preview_status = 'ready'
+     LIMIT 1`,
+  ).bind(mediaId, weddingId).first<{ id: number }>();
+  if (!media) throw new ValidationError('Selected media must be a preview-ready approved image from this wedding');
+}
+
+async function findHomeContent(env: ContentEnv, weddingId: number): Promise<HomeContentRow | null> {
+  return env.DB.prepare(
+    `SELECT h.wedding_id, h.story_enabled, h.story_eyebrow, h.story_title, h.story_intro,
+            h.story_quote, h.story_quote_author
+     FROM wedding_home_content h
+     WHERE h.wedding_id = ?
+     LIMIT 1`,
+  ).bind(weddingId).first<HomeContentRow>();
+}
+
+async function listStoryItems(
+  env: ContentEnv,
+  weddingId: number,
+  publicOnly: boolean,
+): Promise<StoryItemRow[]> {
+  const result = await env.DB.prepare(
+    `SELECT s.id, s.wedding_id, s.year_label, s.title, s.body, s.photo_media_id,
+            s.sort_order, s.enabled, m.preview_status AS photo_preview_status
+     FROM wedding_story_items s
+     LEFT JOIN media m
+       ON m.id = s.photo_media_id
+      AND m.wedding_id = s.wedding_id
+      AND m.status = 'approved'
+      AND m.mime_type LIKE 'image/%'
+     WHERE s.wedding_id = ?${publicOnly ? ' AND s.enabled = 1' : ''}
+     ORDER BY s.sort_order, s.id`,
+  ).bind(weddingId).all<StoryItemRow>();
+  return result.results;
+}
+
 async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promise<Response> {
-  const [settings, schedule, locations, info] = await Promise.all([
+  const [settings, home, storyItems, schedule, locations, info] = await Promise.all([
     env.DB.prepare(
       `SELECT schedule_enabled, locations_enabled, info_enabled
        FROM wedding_settings WHERE wedding_id = ? LIMIT 1`,
     ).bind(wedding.id).first<SectionSettingsRow>(),
+    findHomeContent(env, wedding.id),
+    listStoryItems(env, wedding.id, true),
     env.DB.prepare(
       `SELECT id, wedding_id, time_label, title, subtitle, description, sort_order, enabled
        FROM wedding_schedule
@@ -273,10 +449,17 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
        ORDER BY sort_order, id`,
     ).bind(wedding.id).all<ScheduleRow>(),
     env.DB.prepare(
-      `SELECT id, wedding_id, name, type, address, maps_url, description, sort_order, enabled
-       FROM wedding_locations
-       WHERE wedding_id = ? AND enabled = 1
-       ORDER BY sort_order, id`,
+      `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
+              l.photo_media_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status
+       FROM wedding_locations l
+       LEFT JOIN media m
+         ON m.id = l.photo_media_id
+        AND m.wedding_id = l.wedding_id
+        AND m.status = 'approved'
+        AND m.mime_type LIKE 'image/%'
+       WHERE l.wedding_id = ? AND l.enabled = 1
+       ORDER BY l.sort_order, l.id`,
     ).bind(wedding.id).all<LocationRow>(),
     env.DB.prepare(
       `SELECT id, wedding_id, category, title, content, sort_order, enabled
@@ -295,6 +478,7 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
         infoEnabled: settings?.info_enabled !== 0,
       },
     },
+    home: serializeHomeContent(home, storyItems),
     schedule: schedule.results.map((row) => serializeSchedule(row)),
     locations: locations.results.map((row) => serializeLocation(row)),
     info: info.results.map((row) => serializeInfo(row)),
@@ -329,6 +513,99 @@ async function handleWeddingAdmin(
 
   const updated = await findCurrentWedding(env);
   return json(serializeWedding(updated ?? wedding));
+}
+
+async function handleHomeContent(
+  request: Request,
+  env: ContentEnv,
+  weddingId: number,
+): Promise<Response> {
+  if (request.method === 'GET') {
+    return json(serializeHomeContentAdmin(await findHomeContent(env, weddingId)));
+  }
+  if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
+
+  const content = parseHomeContent(await requestBody(request));
+  await env.DB.prepare(
+    `INSERT INTO wedding_home_content (
+       wedding_id, story_enabled, story_eyebrow, story_title, story_intro,
+       story_quote, story_quote_author, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(wedding_id) DO UPDATE SET
+       story_enabled = excluded.story_enabled,
+       story_eyebrow = excluded.story_eyebrow,
+       story_title = excluded.story_title,
+       story_intro = excluded.story_intro,
+       story_quote = excluded.story_quote,
+       story_quote_author = excluded.story_quote_author,
+       updated_at = CURRENT_TIMESTAMP`,
+  ).bind(
+    weddingId, Number(content.storyEnabled), content.storyEyebrow, content.storyTitle,
+    content.storyIntro, content.storyQuote, content.storyQuoteAuthor,
+  ).run();
+
+  return json(serializeHomeContentAdmin(await findHomeContent(env, weddingId)));
+}
+
+async function handleStoryItems(
+  request: Request,
+  env: ContentEnv,
+  weddingId: number,
+  itemId: number | null,
+): Promise<Response> {
+  if (request.method === 'GET' && itemId === null) {
+    const items = await listStoryItems(env, weddingId, false);
+    return json({ story: items.map((item) => serializeStoryItem(item, true)), count: items.length, limit: 10 });
+  }
+
+  if (request.method === 'POST' && itemId === null) {
+    const count = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM wedding_story_items WHERE wedding_id = ?',
+    ).bind(weddingId).first<{ count: number }>();
+    if ((count?.count ?? 0) >= 10) throw new ValidationError('A maximum of 10 story items is allowed');
+
+    const item = parseStoryItem(await requestBody(request));
+    await validateApprovedImage(env, weddingId, item.photoMediaId);
+    const result = await env.DB.prepare(
+      `INSERT INTO wedding_story_items
+         (wedding_id, year_label, title, body, photo_media_id, sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      weddingId, item.yearLabel, item.title, item.body, item.photoMediaId,
+      item.sortOrder, Number(item.enabled),
+    ).run();
+    const created = (await listStoryItems(env, weddingId, false))
+      .find((candidate) => candidate.id === result.meta.last_row_id);
+    return json(serializeStoryItem(created!, true), 201);
+  }
+
+  if (itemId === null) return json({ error: 'Not found' }, 404);
+  const existing = await env.DB.prepare(
+    'SELECT id FROM wedding_story_items WHERE id = ? AND wedding_id = ? LIMIT 1',
+  ).bind(itemId, weddingId).first<{ id: number }>();
+  if (!existing) return json({ error: 'Story item not found' }, 404);
+
+  if (request.method === 'DELETE') {
+    await env.DB.prepare('DELETE FROM wedding_story_items WHERE id = ? AND wedding_id = ?')
+      .bind(itemId, weddingId).run();
+    return json({ id: itemId, deleted: true });
+  }
+  if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
+
+  const item = parseStoryItem(await requestBody(request));
+  await validateApprovedImage(env, weddingId, item.photoMediaId);
+  await env.DB.prepare(
+    `UPDATE wedding_story_items
+     SET year_label = ?, title = ?, body = ?, photo_media_id = ?, sort_order = ?,
+         enabled = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND wedding_id = ?`,
+  ).bind(
+    item.yearLabel, item.title, item.body, item.photoMediaId, item.sortOrder,
+    Number(item.enabled), itemId, weddingId,
+  ).run();
+  const updated = (await listStoryItems(env, weddingId, false))
+    .find((candidate) => candidate.id === itemId);
+  return json(serializeStoryItem(updated!, true));
 }
 
 async function handleSchedule(
@@ -399,25 +676,38 @@ async function handleLocations(
 ): Promise<Response> {
   if (request.method === 'GET' && itemId === null) {
     const result = await env.DB.prepare(
-      `SELECT id, wedding_id, name, type, address, maps_url, description, sort_order, enabled
-       FROM wedding_locations WHERE wedding_id = ? ORDER BY sort_order, id`,
+      `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
+              l.photo_media_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status
+       FROM wedding_locations l
+       LEFT JOIN media m
+         ON m.id = l.photo_media_id
+        AND m.wedding_id = l.wedding_id
+        AND m.status = 'approved'
+        AND m.mime_type LIKE 'image/%'
+       WHERE l.wedding_id = ? ORDER BY l.sort_order, l.id`,
     ).bind(weddingId).all<LocationRow>();
     return json({ locations: result.results.map((row) => serializeLocation(row, true)) });
   }
 
   if (request.method === 'POST' && itemId === null) {
     const item = parseLocation(await requestBody(request));
+    await validateApprovedImage(env, weddingId, item.photo_media_id);
     const result = await env.DB.prepare(
       `INSERT INTO wedding_locations
-         (wedding_id, name, type, address, maps_url, description, sort_order, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (wedding_id, name, type, address, maps_url, description, photo_media_id, sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.name, item.type, item.address, item.mapsUrl, item.description,
-      item.sortOrder, Number(item.enabled),
+      item.photo_media_id, item.sortOrder, Number(item.enabled),
     ).run();
     const row = await env.DB.prepare(
-      `SELECT id, wedding_id, name, type, address, maps_url, description, sort_order, enabled
-       FROM wedding_locations WHERE id = ? AND wedding_id = ?`,
+      `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
+              l.photo_media_id, l.sort_order, l.enabled,
+              m.preview_status AS photo_preview_status
+       FROM wedding_locations l
+       LEFT JOIN media m ON m.id = l.photo_media_id
+       WHERE l.id = ? AND l.wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<LocationRow>();
     return json(serializeLocation(row!, true), 201);
   }
@@ -436,17 +726,23 @@ async function handleLocations(
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseLocation(await requestBody(request));
+  await validateApprovedImage(env, weddingId, item.photo_media_id);
   await env.DB.prepare(
     `UPDATE wedding_locations
-     SET name = ?, type = ?, address = ?, maps_url = ?, description = ?, sort_order = ?, enabled = ?
+     SET name = ?, type = ?, address = ?, maps_url = ?, description = ?, photo_media_id = ?,
+         sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
-    item.name, item.type, item.address, item.mapsUrl, item.description, item.sortOrder,
-    Number(item.enabled), itemId, weddingId,
+    item.name, item.type, item.address, item.mapsUrl, item.description,
+    item.photo_media_id, item.sortOrder, Number(item.enabled), itemId, weddingId,
   ).run();
   const row = await env.DB.prepare(
-    `SELECT id, wedding_id, name, type, address, maps_url, description, sort_order, enabled
-     FROM wedding_locations WHERE id = ? AND wedding_id = ?`,
+    `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
+            l.photo_media_id, l.sort_order, l.enabled,
+            m.preview_status AS photo_preview_status
+     FROM wedding_locations l
+     LEFT JOIN media m ON m.id = l.photo_media_id
+     WHERE l.id = ? AND l.wedding_id = ?`,
   ).bind(itemId, weddingId).first<LocationRow>();
   return json(serializeLocation(row!, true));
 }
@@ -515,7 +811,8 @@ export async function handleContentRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const isPublicContent = request.method === 'GET' && url.pathname === '/api/wedding/content';
-  const isAdminContent = url.pathname.startsWith('/api/admin/content/');
+  const isAdminContent = url.pathname.startsWith('/api/admin/content/')
+    || url.pathname === '/api/admin/home-content';
   if (!isPublicContent && !isAdminContent) return null;
 
   try {
@@ -526,6 +823,14 @@ export async function handleContentRequest(
     if (isPublicContent) return await publicContent(env, wedding);
     if (url.pathname === '/api/admin/content/wedding') {
       return await handleWeddingAdmin(request, env, wedding);
+    }
+    if (url.pathname === '/api/admin/home-content') {
+      return await handleHomeContent(request, env, wedding.id);
+    }
+
+    const storyMatch = url.pathname.match(/^\/api\/admin\/content\/story(?:\/(\d+))?$/);
+    if (storyMatch) {
+      return await handleStoryItems(request, env, wedding.id, storyMatch[1] ? Number(storyMatch[1]) : null);
     }
 
     const scheduleMatch = url.pathname.match(/^\/api\/admin\/content\/schedule(?:\/(\d+))?$/);
