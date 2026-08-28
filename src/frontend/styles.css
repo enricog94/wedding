@@ -2695,41 +2695,56 @@ button.gallery-item:hover .gallery-item__image {
 
 /* STORY SECTION (NOI) */
 .story-section {
-  padding-bottom: 5rem;
+  padding-block: 7rem;
+}
+
+.story-section .section__inner {
+  width: min(100%, 78rem);
+}
+
+.story-section .section-title__eyebrow {
+  margin-bottom: 1.15rem;
+}
+
+.story-section .section-title h2 {
+  font-size: clamp(2.85rem, 12vw, 4.75rem);
+  line-height: 0.94;
 }
 
 .story-intro {
-  max-width: 44rem;
-  margin: 2rem auto 0;
+  max-width: 40rem;
+  margin: 2.75rem auto 0;
   color: var(--color-muted);
   text-align: center;
-  line-height: 1.8;
+  font-family: var(--font-body);
+  line-height: 1.9;
 }
 
 .story-quote {
-  max-width: 38rem;
-  margin: 2.5rem auto 0;
+  max-width: 44rem;
+  margin: 3.75rem auto 0;
   text-align: center;
 }
 
 .story-quote p {
   margin: 0;
-  font: italic 500 clamp(1.45rem, 6vw, 2rem)/1.35 var(--font-display);
+  font: italic 500 clamp(1.6rem, 6vw, 2.35rem)/1.38 var(--font-display);
+  letter-spacing: -0.012em;
 }
 
 .story-quote cite {
   display: block;
-  margin-top: 0.75rem;
+  margin-top: 1.25rem;
   color: var(--color-muted);
-  font: 500 0.65rem/1.4 var(--font-body);
-  letter-spacing: 0.12em;
+  font: 600 0.66rem/1.4 var(--font-body);
+  letter-spacing: 0.16em;
   text-transform: uppercase;
 }
 
 .story-timeline {
   display: grid;
-  gap: 5.5rem;
-  margin-top: 5rem;
+  gap: 4.75rem;
+  margin-top: 6rem;
 }
 
 .story-moment {
@@ -2738,45 +2753,64 @@ button.gallery-item:hover .gallery-item__image {
 }
 
 .story-moment__media {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   margin: 0;
 }
 
 .story-moment__media img {
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: 4 / 3;
+  border: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
   object-fit: cover;
 }
 
-.story-moment__media figcaption,
-.story-moment__year {
+.story-moment__media figcaption {
+  position: relative;
+  z-index: 1;
   width: fit-content;
-  margin: -0.7rem 0 0 1rem;
-  border: 1px solid var(--color-line);
-  padding: 0.45rem 0.75rem;
-  color: var(--color-olive);
-  background: var(--color-ivory);
-  font: 600 0.68rem/1 var(--font-body);
-  letter-spacing: 0.1em;
+  min-width: 4.5rem;
+  margin: -1.25rem auto 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 58%, var(--color-line));
+  padding: 0.75rem 1.5rem;
+  color: var(--color-text);
+  background: var(--color-paper);
+  box-shadow: 0 0.4rem 1rem color-mix(in srgb, var(--color-text) 8%, transparent);
+  font: 600 1.05rem/1 var(--font-display);
+  letter-spacing: 0.08em;
+  text-align: center;
   text-transform: uppercase;
+}
+
+.story-moment__text {
+  max-width: 32rem;
 }
 
 .story-moment__text h3 {
   margin: 0;
-  font: 500 clamp(2.15rem, 10vw, 3.4rem)/0.98 var(--font-display);
-  letter-spacing: -0.025em;
+  font: 500 clamp(2.25rem, 10vw, 3.35rem)/1 var(--font-display);
+  letter-spacing: -0.02em;
 }
 
 .story-moment__text > p:not(.story-moment__year) {
-  max-width: 34rem;
-  margin: 1rem 0 0;
+  max-width: 28.5rem;
+  margin: 1.25rem 0 0;
   color: var(--color-muted);
-  font-size: 0.95rem;
-  line-height: 1.8;
+  font: 400 0.97rem/1.88 var(--font-body);
 }
 
 .story-moment__text .story-moment__year {
-  margin: 0 0 1.25rem;
+  width: fit-content;
+  margin: 0 0 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-line) 82%, transparent);
+  padding: 0.65rem 1.3rem;
+  color: var(--color-olive);
+  background: var(--color-paper);
+  font: 600 0.82rem/1 var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 /* LOCATION EDITORIAL */
@@ -2912,14 +2946,19 @@ button.gallery-item:hover .gallery-item__image {
   }
 
   .story-timeline {
-    gap: 8rem;
-    margin-top: 7rem;
+    gap: clamp(5rem, 7vw, 6.875rem);
+    margin-top: 8rem;
   }
 
   .story-moment {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: clamp(4rem, 8vw, 8rem);
+    grid-template-columns: minmax(0, 46%) minmax(0, 38%);
+    justify-content: space-between;
+    gap: 0;
     align-items: center;
+  }
+
+  .story-moment--reverse {
+    grid-template-columns: minmax(0, 38%) minmax(0, 46%);
   }
 
   .story-moment--reverse .story-moment__media {
@@ -2929,12 +2968,52 @@ button.gallery-item:hover .gallery-item__image {
   .story-moment--reverse .story-moment__text {
     grid-row: 1;
     grid-column: 1;
-    justify-self: end;
+    justify-self: start;
   }
 
   .story-moment--without-photo {
-    grid-template-columns: minmax(0, 42rem);
+    grid-template-columns: minmax(0, 38rem);
     justify-content: center;
+  }
+
+  .story-section {
+    padding-block: clamp(8rem, 10vw, 10rem);
+  }
+
+  .story-intro {
+    margin-top: 3.25rem;
+  }
+
+  .story-quote {
+    margin-top: 5rem;
+  }
+
+  .program-section .section__inner {
+    width: min(100%, 82rem);
+  }
+
+  .program-section .section-layout {
+    grid-template-columns: minmax(15rem, 0.7fr) minmax(32rem, 1.35fr);
+    gap: clamp(5rem, 9vw, 9rem);
+  }
+
+  .program-section .timeline {
+    width: 100%;
+    max-width: 46rem;
+  }
+
+  .program-section .timeline-item {
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 1.75rem;
+    padding: 0 0 4.5rem 2.6rem;
+  }
+
+  .program-section .timeline-item:last-child {
+    padding-bottom: 0;
+  }
+
+  .program-section .timeline-item p {
+    margin-top: 0.7rem;
   }
 
   .location-grid--editorial {

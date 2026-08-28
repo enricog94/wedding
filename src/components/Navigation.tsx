@@ -4,6 +4,7 @@ type NavigationProps = {
   brideName: string;
   groomName: string;
   sections?: {
+    story: boolean;
     schedule: boolean;
     locations: boolean;
     info: boolean;
@@ -18,6 +19,7 @@ export function Navigation({ brideName, groomName, sections, overHero = false }:
   const groomInitial = groomName.trim().charAt(0).toUpperCase();
   const links = [
     { href: '/#home', label: 'Home', visible: true },
+    { href: '/#storia', label: 'Storia', visible: sections?.story === true },
     { href: '/#programma', label: 'Programma', visible: sections?.schedule !== false },
     { href: '/#location', label: 'Location', visible: sections?.locations !== false },
     { href: '/gallery', label: 'Gallery', visible: true },

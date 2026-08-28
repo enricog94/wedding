@@ -76,13 +76,15 @@ export function App() {
   );
   const theme = useMemo(() => getWeddingTheme(wedding.slug), [wedding.slug]);
   const date = weddingDateParts(wedding.weddingDate);
-  const firstPublicSection = showSchedule
-    ? '#programma'
-    : showLocations
-      ? '#location'
-      : showInfo
-        ? '#info'
-        : null;
+  const firstPublicSection = showStory
+    ? '#storia'
+    : showSchedule
+      ? '#programma'
+      : showLocations
+        ? '#location'
+        : showInfo
+          ? '#info'
+          : null;
 
   useEffect(() => applyWeddingTheme(theme), [theme]);
 
@@ -91,7 +93,12 @@ export function App() {
       <Navigation
         brideName={wedding.brideName}
         groomName={wedding.groomName}
-        sections={{ schedule: showSchedule, locations: showLocations, info: showInfo }}
+        sections={{
+          story: showStory,
+          schedule: showSchedule,
+          locations: showLocations,
+          info: showInfo,
+        }}
         overHero={!isPhotoPage && !isGalleryPage && !isAdminPage}
       />
       {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminPage /> : <main>
@@ -136,7 +143,7 @@ export function App() {
         </div>
 
         {showStory && (
-          <Section id="noi" tone="paper" className="story-section">
+          <Section id="storia" tone="paper" className="story-section">
             <SectionTitle eyebrow={home.storyEyebrow ?? ''} title={home.storyTitle ?? ''} align="center" />
             {home.storyIntro && <p className="story-intro">{home.storyIntro}</p>}
             {home.storyQuote && (
