@@ -153,27 +153,20 @@ export function App() {
               </blockquote>
             )}
             <div className="story-timeline">
-              <svg
-                className="story-timeline__path"
-                viewBox="0 0 1200 1000"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="M620 0 C700 110 510 185 590 290 S705 450 610 555 S520 720 635 805 S700 930 600 1000" />
-              </svg>
               {home.storyItems.map((item, index) => (
                 <FadeIn key={item.id} delay={Math.min(index * 100, 400)} className={`story-moment${index % 2 === 1 ? ' story-moment--reverse' : ''}${item.photo ? '' : ' story-moment--without-photo'}`}>
-                  {item.photo && (
-                    <figure className="story-moment__media">
-                      <img src={item.photo.previewUrl} alt={item.title} loading="lazy" decoding="async" />
-                      {item.yearLabel && <figcaption>{item.yearLabel}</figcaption>}
-                    </figure>
-                  )}
-                  <div className="story-moment__text">
-                    {!item.photo && item.yearLabel && <p className="story-moment__year">{item.yearLabel}</p>}
-                    <h3>{item.title}</h3>
-                    {item.body && <p>{item.body}</p>}
+                  <div className="story-moment__card">
+                    {item.photo && (
+                      <figure className="story-moment__media">
+                        <img src={item.photo.previewUrl} alt={item.title} loading="lazy" decoding="async" />
+                        {item.yearLabel && <figcaption>{item.yearLabel}</figcaption>}
+                      </figure>
+                    )}
+                    <div className="story-moment__text">
+                      {!item.photo && item.yearLabel && <p className="story-moment__year">{item.yearLabel}</p>}
+                      <h3>{item.title}</h3>
+                      {item.body && <p>{item.body}</p>}
+                    </div>
                   </div>
                 </FadeIn>
               ))}
