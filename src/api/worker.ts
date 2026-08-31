@@ -1,7 +1,7 @@
 import { handleContentRequest } from './content';
+import { createPostgresDatabase, type Database } from '../lib/supabase-db';
 
-export interface Env {
-  DB: D1Database;
+export interface WorkerEnv {
   MEDIA_BUCKET: R2Bucket;
   IMAGES: ImagesBinding;
   MEDIA_PROCESSING_QUEUE: Queue<MediaProcessingMessage>;
@@ -10,8 +10,21 @@ export interface Env {
   R2_ACCOUNT_ID: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
-  TEAM_DOMAIN: string;
-  ACCESS_AUD: string;
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+  HYPERDRIVE?: Hyperdrive;
+  SUPABASE_DATABASE_URL?: string;
+}
+
+export type Env = WorkerEnv & { DB: Database };
+
+function withDatabase(env: WorkerEnv): Env {
+  return {
+    ...env,
+    DB: createPostgresDatabase({
+      connectionString: env.HYPERDRIVE?.connectionString ?? env.SUPABASE_DATABASE_URL,
+    }),
+  };
 }
 
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' };
@@ -130,120 +143,27 @@ export type AdminIdentity = {
   email?: string;
 };
 
-type AccessJwk = JsonWebKey & {
-  kid?: string;
-};
-
-type AccessJwtOptions = {
-  issuer: string;
-  audience: string;
-  keys: AccessJwk[];
-  now?: number;
-};
-
 type AdminAuthorization =
   | { authorized: true; identity: AdminIdentity }
   | { authorized: false; response: Response };
 
-const accessKeysCache = new Map<string, { expiresAt: number; keys: AccessJwk[] }>();
-
-function decodeBase64Url(value: string): Uint8Array {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
-  const decoded = atob(padded);
-  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-}
-
-function asArrayBuffer(value: Uint8Array): ArrayBuffer {
-  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer;
-}
-
-function decodeJwtPart(value: string): Record<string, unknown> {
-  const decoded = new TextDecoder().decode(decodeBase64Url(value));
-  const parsed: unknown = JSON.parse(decoded);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Invalid JWT payload');
-  }
-  return parsed as Record<string, unknown>;
-}
-
-export async function verifyAccessJwt(
-  token: string,
-  { issuer, audience, keys, now = Math.floor(Date.now() / 1000) }: AccessJwtOptions,
-): Promise<AdminIdentity> {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('Invalid JWT');
-
-  const [encodedHeader, encodedPayload, encodedSignature] = parts;
-  const header = decodeJwtPart(encodedHeader);
-  const payload = decodeJwtPart(encodedPayload);
-  if (header.alg !== 'RS256' || typeof header.kid !== 'string') {
-    throw new Error('Unsupported JWT');
-  }
-
-  const jwk = keys.find((candidate) => candidate.kid === header.kid && candidate.kty === 'RSA');
-  if (!jwk) throw new Error('Unknown signing key');
-
-  const publicKey = await crypto.subtle.importKey(
-    'jwk',
-    jwk,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
-  const signatureValid = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5',
-    publicKey,
-    asArrayBuffer(decodeBase64Url(encodedSignature)),
-    textEncoder.encode(`${encodedHeader}.${encodedPayload}`),
-  );
-  if (!signatureValid) throw new Error('Invalid JWT signature');
-
-  const tokenAudience = payload.aud;
-  const audienceValid = tokenAudience === audience
-    || (Array.isArray(tokenAudience) && tokenAudience.includes(audience));
-  if (payload.iss !== issuer || !audienceValid) throw new Error('Invalid JWT claims');
-  if (typeof payload.exp !== 'number' || payload.exp <= now) throw new Error('Expired JWT');
-  if (typeof payload.nbf === 'number' && payload.nbf > now) throw new Error('Inactive JWT');
-  if (typeof payload.sub !== 'string' || !payload.sub.trim()) throw new Error('Missing subject');
-
-  return {
-    subject: payload.sub,
-    ...(typeof payload.email === 'string' && payload.email.trim()
-      ? { email: payload.email }
-      : {}),
-  };
-}
-
-async function getAccessKeys(teamDomain: string): Promise<AccessJwk[]> {
-  const cached = accessKeysCache.get(teamDomain);
-  if (cached && cached.expiresAt > Date.now()) return cached.keys;
-
-  const response = await fetch(`${teamDomain}/cdn-cgi/access/certs`);
-  if (!response.ok) throw new Error('Unable to load Access signing keys');
-  const payload: unknown = await response.json();
-  if (!payload || typeof payload !== 'object' || !Array.isArray((payload as { keys?: unknown }).keys)) {
-    throw new Error('Invalid Access signing keys');
-  }
-
-  const keys = (payload as { keys: AccessJwk[] }).keys;
-  accessKeysCache.set(teamDomain, { expiresAt: Date.now() + 5 * 60 * 1000, keys });
-  return keys;
-}
-
 async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorization> {
-  const token = request.headers.get('cf-access-jwt-assertion')?.trim();
+  const authorization = request.headers.get('authorization')?.trim() ?? '';
+  const token = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : '';
   if (!token) {
     return {
       authorized: false,
-      response: json({ error: 'Cloudflare Access authentication required' }, 401),
+      response: json({ error: 'Supabase authentication required' }, 401),
     };
   }
 
-  const teamDomain = env.TEAM_DOMAIN?.trim().replace(/\/$/, '');
-  const audience = env.ACCESS_AUD?.trim();
-  if (!teamDomain || !audience) {
-    console.error('Cloudflare Access validation is not configured');
+  const supabaseUrl = env.SUPABASE_URL?.trim().replace(/\/$/, '');
+  const anonKey = env.SUPABASE_ANON_KEY?.trim();
+  const weddingSlug = env.CURRENT_WEDDING_SLUG?.trim();
+  if (!supabaseUrl || !anonKey || !weddingSlug) {
+    console.error('Supabase admin authentication is not configured');
     return {
       authorized: false,
       response: json({ error: 'Admin authentication is not configured' }, 500),
@@ -251,17 +171,39 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorizat
   }
 
   try {
-    const identity = await verifyAccessJwt(token, {
-      issuer: teamDomain,
-      audience,
-      keys: await getAccessKeys(teamDomain),
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { apikey: anonKey, authorization: `Bearer ${token}` },
     });
+    if (!response.ok) {
+      return { authorized: false, response: json({ error: 'Invalid or expired Supabase session' }, 401) };
+    }
+    const user = await response.json() as { id?: string; email?: string };
+    if (!user.id) {
+      return { authorized: false, response: json({ error: 'Invalid Supabase identity' }, 401) };
+    }
+
+    const role = await env.DB.prepare(
+      `SELECT p.system_role, wm.role AS wedding_role
+       FROM weddings w
+       LEFT JOIN profiles p ON p.user_id = ?
+       LEFT JOIN wedding_members wm ON wm.wedding_id = w.id AND wm.user_id = ?
+       WHERE w.slug = ?
+       LIMIT 1`,
+    ).bind(user.id, user.id, weddingSlug).first<{ system_role: string | null; wedding_role: string | null }>();
+    if (role?.system_role !== 'super_admin' && role?.wedding_role !== 'wedding_admin') {
+      return { authorized: false, response: json({ error: 'Admin role required' }, 403) };
+    }
+
+    const identity: AdminIdentity = {
+      subject: user.id,
+      ...(user.email ? { email: user.email } : {}),
+    };
     return { authorized: true, identity };
   } catch (error) {
-    console.warn('Cloudflare Access token validation failed', error);
+    console.warn('Supabase admin validation failed', error);
     return {
       authorized: false,
-      response: json({ error: 'Invalid Cloudflare Access authentication' }, 403),
+      response: json({ error: 'Admin authentication unavailable' }, 500),
     };
   }
 }
@@ -277,15 +219,15 @@ type WeddingRow = {
 
 type WeddingSettingsRow = {
   wedding_id: number;
-  gallery_enabled: number;
-  gallery_preview_enabled: number;
-  gallery_download_enabled: number;
-  guest_uploads_enabled: number;
-  require_guest_approval: number;
-  photobooth_auto_approve: number;
-  schedule_enabled: number;
-  locations_enabled: number;
-  info_enabled: number;
+  gallery_enabled: boolean;
+  gallery_preview_enabled: boolean;
+  gallery_download_enabled: boolean;
+  guest_uploads_enabled: boolean;
+  require_guest_approval: boolean;
+  photobooth_auto_approve: boolean;
+  schedule_enabled: boolean;
+  locations_enabled: boolean;
+  info_enabled: boolean;
 };
 
 type WeddingSettings = {
@@ -403,15 +345,15 @@ const DEFAULT_WEDDING_SETTINGS: WeddingSettings = {
 function serializeWeddingSettings(row: WeddingSettingsRow | null): WeddingSettings {
   if (!row) return DEFAULT_WEDDING_SETTINGS;
   return {
-    galleryEnabled: row.gallery_enabled === 1,
-    galleryPreviewEnabled: row.gallery_preview_enabled === 1,
-    galleryDownloadEnabled: row.gallery_download_enabled === 1,
-    guestUploadsEnabled: row.guest_uploads_enabled === 1,
-    requireGuestApproval: row.require_guest_approval === 1,
-    photoboothAutoApprove: row.photobooth_auto_approve === 1,
-    scheduleEnabled: row.schedule_enabled === 1,
-    locationsEnabled: row.locations_enabled === 1,
-    infoEnabled: row.info_enabled === 1,
+    galleryEnabled: row.gallery_enabled,
+    galleryPreviewEnabled: row.gallery_preview_enabled,
+    galleryDownloadEnabled: row.gallery_download_enabled,
+    guestUploadsEnabled: row.guest_uploads_enabled,
+    requireGuestApproval: row.require_guest_approval,
+    photoboothAutoApprove: row.photobooth_auto_approve,
+    scheduleEnabled: row.schedule_enabled,
+    locationsEnabled: row.locations_enabled,
+    infoEnabled: row.info_enabled,
   };
 }
 
@@ -520,17 +462,181 @@ async function findOwnedMedia(env: Env, weddingId: number, mediaId: number): Pro
     .first<MediaRow>();
 }
 
-async function deleteOwnedMedia(env: Env, weddingId: number, mediaId: number): Promise<boolean> {
+type MediaStatusMutation = 'updated' | 'unchanged' | 'not_found' | 'invalid_status' | 'preview_not_ready';
+
+type BulkMediaMutationRow = {
+  requested_id: number;
+  previous_status: string | null;
+  result_status: string | null;
+  wedding_id: number | null;
+  mime_type: string | null;
+  preview_status: string | null;
+};
+
+async function setOwnedMediaStatus(
+  env: Env,
+  weddingId: number,
+  mediaId: number,
+  nextStatus: string,
+  allowedStatuses: ReadonlySet<string>,
+  requireReadyImagePreview = false,
+): Promise<MediaStatusMutation> {
   const media = await findOwnedMedia(env, weddingId, mediaId);
+  if (!media) return 'not_found';
+  if (!allowedStatuses.has(media.status)) return 'invalid_status';
+  if (requireReadyImagePreview && media.mime_type.startsWith('image/') && media.preview_status !== 'ready') {
+    return 'preview_not_ready';
+  }
+  if (media.status === nextStatus) return 'unchanged';
+
+  const update = await env.DB.prepare(
+    'UPDATE media SET status = ? WHERE id = ? AND wedding_id = ? AND status = ?',
+  ).bind(nextStatus, media.id, weddingId, media.status).run();
+  if (update.meta.changes === 1) {
+    const persisted = update.results[0] as unknown as Pick<MediaRow, 'id' | 'wedding_id' | 'status'> | undefined;
+    if (
+      !persisted
+      || persisted.id !== media.id
+      || persisted.wedding_id !== weddingId
+      || persisted.status !== nextStatus
+    ) {
+      throw new Error(`Media ${media.id} did not reach status ${nextStatus}`);
+    }
+    return 'updated';
+  }
+
+  const current = await findOwnedMedia(env, weddingId, media.id);
+  if (!current) return 'not_found';
+  if (current.status !== nextStatus) {
+    throw new Error(`Media ${media.id} did not reach status ${nextStatus}`);
+  }
+  return 'unchanged';
+}
+
+async function bulkSetOwnedMediaStatus(
+  env: Env,
+  weddingId: number,
+  ids: number[],
+  action: 'approve' | 'hide',
+): Promise<{
+  eligibleIds: number[];
+  updatedIds: number[];
+  unchangedIds: number[];
+  previewNotReadyIds: number[];
+  skippedIds: number[];
+  notFoundIds: number[];
+}> {
+  const requestedValues = ids.map(() => '(?::bigint)').join(', ');
+  const nextStatus = action === 'approve' ? 'approved' : 'hidden';
+  const mutableStatuses = action === 'approve'
+    ? "('pending')"
+    : "('pending', 'approved')";
+  const previewEligibility = action === 'approve'
+    ? "AND (m.mime_type NOT LIKE 'image/%' OR m.preview_status = 'ready')"
+    : '';
+  const result = await env.DB.prepare(
+    `WITH requested(id) AS (VALUES ${requestedValues}),
+          candidates AS MATERIALIZED (
+            SELECT m.id, m.wedding_id, m.status, m.mime_type, m.preview_status
+            FROM media m
+            INNER JOIN requested r ON r.id = m.id
+            WHERE m.wedding_id = ?
+          ),
+          updated AS (
+            UPDATE media m
+            SET status = ?
+            FROM candidates c
+            WHERE m.id = c.id
+              AND m.wedding_id = ?
+              AND m.status IN ${mutableStatuses}
+              ${previewEligibility}
+            RETURNING m.id, m.wedding_id, m.status
+          )
+     SELECT r.id AS requested_id,
+            c.status AS previous_status,
+            u.status AS result_status,
+            c.wedding_id,
+            c.mime_type,
+            c.preview_status
+     FROM requested r
+     LEFT JOIN candidates c ON c.id = r.id
+     LEFT JOIN updated u ON u.id = r.id
+     ORDER BY r.id`,
+  ).bind(...ids, weddingId, nextStatus, weddingId).all<BulkMediaMutationRow>();
+
+  const updatedIds: number[] = [];
+  const unchangedIds: number[] = [];
+  const previewNotReadyIds: number[] = [];
+  const skippedIds: number[] = [];
+  const notFoundIds: number[] = [];
+  for (const row of result.results) {
+    if (row.result_status === nextStatus && row.wedding_id === weddingId) {
+      updatedIds.push(row.requested_id);
+    } else if (row.previous_status === nextStatus && row.wedding_id === weddingId) {
+      unchangedIds.push(row.requested_id);
+    } else if (row.previous_status === null || row.wedding_id === null) {
+      notFoundIds.push(row.requested_id);
+    } else if (
+      action === 'approve'
+      && row.previous_status === 'pending'
+      && row.mime_type?.startsWith('image/')
+      && row.preview_status !== 'ready'
+    ) {
+      previewNotReadyIds.push(row.requested_id);
+    } else {
+      skippedIds.push(row.requested_id);
+    }
+  }
+  return {
+    eligibleIds: [...updatedIds, ...unchangedIds],
+    updatedIds,
+    unchangedIds,
+    previewNotReadyIds,
+    skippedIds,
+    notFoundIds,
+  };
+}
+
+async function deleteR2Keys(env: Env, keys: Array<string | null>): Promise<void> {
+  for (const key of new Set(keys.filter((value): value is string => Boolean(value)))) {
+    await env.MEDIA_BUCKET.delete(key);
+  }
+}
+
+async function deleteOwnedMedia(env: Env, wedding: WeddingRow, mediaId: number): Promise<boolean> {
+  const media = await findOwnedMedia(env, wedding.id, mediaId);
   if (!media) return false;
 
-  const keys = [media.original_key, media.thumbnail_key, media.preview_key]
-    .filter((key): key is string => Boolean(key));
-  for (const key of keys) await env.MEDIA_BUCKET.delete(key);
+  await env.DB.prepare(
+    'UPDATE wedding_story_items SET photo_media_id = NULL WHERE wedding_id = ? AND photo_media_id = ?',
+  ).bind(wedding.id, media.id).run();
+  await env.DB.prepare(
+    'UPDATE wedding_locations SET photo_media_id = NULL WHERE wedding_id = ? AND photo_media_id = ?',
+  ).bind(wedding.id, media.id).run();
 
-  await env.DB.prepare('DELETE FROM media WHERE id = ? AND wedding_id = ?')
-    .bind(media.id, weddingId)
+  const directory = previewSourceDirectory(media.source);
+  const deterministicThumbnailKey = `weddings/${wedding.slug}/${directory}/previews/${media.uuid}-thumbnail.webp`;
+  const deterministicPreviewKey = `weddings/${wedding.slug}/${directory}/previews/${media.uuid}-large.webp`;
+  const keys = [
+    media.original_key,
+    media.thumbnail_key,
+    media.preview_key,
+    deterministicThumbnailKey,
+    deterministicPreviewKey,
+  ];
+  await deleteR2Keys(env, keys);
+
+  const deletion = await env.DB.prepare('DELETE FROM media WHERE id = ? AND wedding_id = ?')
+    .bind(media.id, wedding.id)
     .run();
+
+  if (deletion.meta.changes !== 1) {
+    const remaining = await findOwnedMedia(env, wedding.id, media.id);
+    if (remaining) throw new Error(`PostgreSQL did not delete media ${media.id}`);
+  }
+
+  // Repeat the idempotent cleanup to cover a preview job that completed during deletion.
+  await deleteR2Keys(env, keys);
   return true;
 }
 
@@ -571,15 +677,35 @@ async function findOwnedSiteAsset(
 
 async function deleteOwnedSiteAsset(
   env: Env,
-  weddingId: number,
+  wedding: WeddingRow,
   siteAssetId: number,
 ): Promise<boolean> {
-  const asset = await findOwnedSiteAsset(env, weddingId, siteAssetId);
+  const asset = await findOwnedSiteAsset(env, wedding.id, siteAssetId);
   if (!asset) return false;
-  await env.MEDIA_BUCKET.delete(asset.original_key);
-  if (asset.optimized_key) await env.MEDIA_BUCKET.delete(asset.optimized_key);
-  await env.DB.prepare('DELETE FROM site_assets WHERE id = ? AND wedding_id = ?')
-    .bind(asset.id, weddingId).run();
+
+  await env.DB.prepare(
+    'UPDATE wedding_home_content SET hero_site_asset_id = NULL WHERE wedding_id = ? AND hero_site_asset_id = ?',
+  ).bind(wedding.id, asset.id).run();
+  await env.DB.prepare(
+    'UPDATE wedding_story_items SET photo_site_asset_id = NULL WHERE wedding_id = ? AND photo_site_asset_id = ?',
+  ).bind(wedding.id, asset.id).run();
+  await env.DB.prepare(
+    'UPDATE wedding_locations SET photo_site_asset_id = NULL WHERE wedding_id = ? AND photo_site_asset_id = ?',
+  ).bind(wedding.id, asset.id).run();
+  await env.DB.prepare(
+    'UPDATE wedding_info_items SET image_site_asset_id = NULL WHERE wedding_id = ? AND image_site_asset_id = ?',
+  ).bind(wedding.id, asset.id).run();
+
+  const deterministicOptimizedKey = `weddings/${wedding.slug}/site/optimized/${asset.uuid}.webp`;
+  const keys = [asset.original_key, asset.optimized_key, deterministicOptimizedKey];
+  await deleteR2Keys(env, keys);
+  const deletion = await env.DB.prepare('DELETE FROM site_assets WHERE id = ? AND wedding_id = ?')
+    .bind(asset.id, wedding.id).run();
+  if (deletion.meta.changes !== 1) {
+    const remaining = await findOwnedSiteAsset(env, wedding.id, asset.id);
+    if (remaining) throw new Error(`PostgreSQL did not delete site asset ${asset.id}`);
+  }
+  await deleteR2Keys(env, keys);
   return true;
 }
 
@@ -647,6 +773,71 @@ function previewErrorMessage(error: unknown): string {
   return message.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Preview generation failed';
 }
 
+const MEDIA_PREVIEW_ENQUEUE_ATTEMPTS = 3;
+const MEDIA_PREVIEW_MAX_DELIVERY_ATTEMPTS = 3;
+const MEDIA_PREVIEW_RECOVERY_LIMIT = 100;
+
+async function enqueueMediaPreview(env: Env, mediaId: number): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MEDIA_PREVIEW_ENQUEUE_ATTEMPTS; attempt += 1) {
+    try {
+      await env.MEDIA_PROCESSING_QUEUE.send({ mediaId });
+      return;
+    } catch (error) {
+      lastError = error;
+      console.error(`Unable to enqueue media ${mediaId} preview (attempt ${attempt})`, error);
+    }
+  }
+  throw new Error(`Preview enqueue failed: ${previewErrorMessage(lastError)}`);
+}
+
+async function withPreviewTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out after 45 seconds`)), 45_000);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+async function markMediaPreviewFailed(env: Env, mediaId: number, error: unknown): Promise<boolean> {
+  const update = await env.DB.prepare(
+    `UPDATE media
+     SET preview_status = 'failed', preview_error = ?, preview_generated_at = NULL
+     WHERE id = ? AND preview_status = 'processing'`,
+  )
+    .bind(previewErrorMessage(error), mediaId)
+    .run();
+  return update.meta.changes === 1;
+}
+
+async function markMediaPreviewDeliveryExhausted(
+  env: Env,
+  mediaId: number,
+  attempts: number,
+): Promise<void> {
+  const update = await env.DB.prepare(
+    `UPDATE media
+     SET preview_status = 'failed',
+         preview_error = COALESCE(NULLIF(BTRIM(preview_error), ''), ?),
+         preview_generated_at = NULL
+     WHERE id = ? AND preview_status IN ('pending', 'processing')`,
+  )
+    .bind(`Preview processing stopped after ${attempts} delivery attempts`, mediaId)
+    .run();
+  if (update.meta.changes === 1) return;
+
+  const current = await env.DB.prepare(
+    'SELECT preview_status FROM media WHERE id = ? LIMIT 1',
+  ).bind(mediaId).first<{ preview_status: string }>();
+  if (current && (current.preview_status === 'pending' || current.preview_status === 'processing')) {
+    throw new Error(`Media ${mediaId} remained ${current.preview_status} after exhausted delivery`);
+  }
+}
+
 async function createPreviewVariant(
   env: Env,
   originalKey: string,
@@ -689,47 +880,64 @@ export async function processMediaPreview(
   if (!media) return 'missing';
   if (!isImageMimeType(media.mime_type)) {
     if (media.preview_status !== 'not_applicable') {
-      await env.DB.prepare(
+      const update = await env.DB.prepare(
         `UPDATE media
          SET preview_status = 'not_applicable', preview_error = NULL
          WHERE id = ?`,
       )
         .bind(media.id)
         .run();
+      if (update.meta.changes !== 1) return 'missing';
     }
     return 'not_applicable';
   }
   if (media.preview_status === 'ready') return 'ready';
 
-  await env.DB.prepare(
-    `UPDATE media
-     SET preview_status = 'processing', preview_error = NULL
-     WHERE id = ?`,
-  )
-    .bind(media.id)
-    .run();
-
+  const keys = previewKeys(media);
   try {
-    const keys = previewKeys(media);
-    await createPreviewVariant(env, media.original_key, keys.thumbnailKey, 720, 78);
-    await createPreviewVariant(env, media.original_key, keys.previewKey, 1600, 82);
-    await env.DB.prepare(
+    const processing = await env.DB.prepare(
+      `UPDATE media
+       SET preview_status = 'processing', preview_error = NULL
+       WHERE id = ? AND wedding_id = ? AND preview_status <> 'ready'`,
+    )
+      .bind(media.id, media.wedding_id)
+      .run();
+    if (processing.meta.changes !== 1) {
+      const current = await findOwnedMedia(env, media.wedding_id, media.id);
+      if (!current) return 'missing';
+      if (current.preview_status === 'ready') return 'ready';
+      throw new Error(`Media ${media.id} could not enter preview processing`);
+    }
+
+    await withPreviewTimeout(
+      createPreviewVariant(env, media.original_key, keys.thumbnailKey, 720, 78),
+      `Thumbnail generation for media ${media.id}`,
+    );
+    await withPreviewTimeout(
+      createPreviewVariant(env, media.original_key, keys.previewKey, 1600, 82),
+      `Large preview generation for media ${media.id}`,
+    );
+    const update = await env.DB.prepare(
       `UPDATE media
        SET thumbnail_key = ?, preview_key = ?, preview_status = 'ready',
            preview_error = NULL, preview_generated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`,
+       WHERE id = ? AND wedding_id = ? AND preview_status = 'processing'`,
     )
-      .bind(keys.thumbnailKey, keys.previewKey, media.id)
+      .bind(keys.thumbnailKey, keys.previewKey, media.id, media.wedding_id)
       .run();
+    if (update.meta.changes !== 1) {
+      const current = await findOwnedMedia(env, media.wedding_id, media.id);
+      if (current?.preview_status === 'ready') return 'ready';
+      await deleteR2Keys(env, [keys.thumbnailKey, keys.previewKey]);
+      return 'missing';
+    }
     return 'generated';
   } catch (error) {
-    await env.DB.prepare(
-      `UPDATE media
-       SET preview_status = 'failed', preview_error = ?, preview_generated_at = NULL
-       WHERE id = ?`,
-    )
-      .bind(previewErrorMessage(error), media.id)
-      .run();
+    const failed = await markMediaPreviewFailed(env, media.id, error);
+    const current = failed ? null : await findOwnedMedia(env, media.wedding_id, media.id);
+    if (current?.preview_status === 'ready') return 'ready';
+    await deleteR2Keys(env, [keys.thumbnailKey, keys.previewKey]);
+    if (!failed && !current) return 'missing';
     throw error;
   }
 }
@@ -752,14 +960,15 @@ export async function processSiteAsset(
   if (!asset) return 'missing';
   if (asset.status === 'ready' && asset.optimized_key) return 'ready';
 
-  await env.DB.prepare(
+  const processing = await env.DB.prepare(
     `UPDATE site_assets SET status = 'processing' WHERE id = ?`,
   ).bind(asset.id).run();
+  if (processing.meta.changes !== 1) return 'missing';
 
+  const optimizedKey = `weddings/${asset.wedding_slug}/site/optimized/${asset.uuid}.webp`;
   try {
     const original = await env.MEDIA_BUCKET.get(asset.original_key);
     if (!original) throw new Error('Original site asset object not found');
-    const optimizedKey = `weddings/${asset.wedding_slug}/site/optimized/${asset.uuid}.webp`;
     const transformed = await env.IMAGES.input(original.body)
       .transform({ width: 2200, fit: 'scale-down' })
       .output({ format: 'image/webp', quality: 84 });
@@ -769,16 +978,24 @@ export async function processSiteAsset(
         cacheControl: 'public, max-age=31536000, immutable',
       },
     });
-    await env.DB.prepare(
+    const update = await env.DB.prepare(
       `UPDATE site_assets
        SET optimized_key = ?, status = 'ready', processed_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     ).bind(optimizedKey, asset.id).run();
+    if (update.meta.changes !== 1) {
+      await deleteR2Keys(env, [optimizedKey]);
+      return 'missing';
+    }
     return 'generated';
   } catch (error) {
-    await env.DB.prepare(
+    const update = await env.DB.prepare(
       `UPDATE site_assets SET status = 'failed', processed_at = NULL WHERE id = ?`,
     ).bind(asset.id).run();
+    if (update.meta.changes !== 1) {
+      await deleteR2Keys(env, [optimizedKey]);
+      return 'missing';
+    }
     throw error;
   }
 }
@@ -844,11 +1061,19 @@ async function previewResponse(
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, bindings: WorkerEnv): Promise<Response> {
+    const env = withDatabase(bindings);
     const url = new URL(request.url);
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return json({ status: 'ok' });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/auth/config') {
+      const supabaseUrl = env.SUPABASE_URL?.trim().replace(/\/$/, '');
+      const anonKey = env.SUPABASE_ANON_KEY?.trim();
+      if (!supabaseUrl || !anonKey) return json({ error: 'Authentication is not configured' }, 500);
+      return json({ supabaseUrl, anonKey });
     }
 
     const adminAuthorization = url.pathname.startsWith('/api/admin/')
@@ -856,6 +1081,13 @@ export default {
       : null;
     if (adminAuthorization && !adminAuthorization.authorized) {
       return adminAuthorization.response;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/admin/session' && adminAuthorization?.authorized) {
+      return json({
+        userId: adminAuthorization.identity.subject,
+        email: adminAuthorization.identity.email ?? null,
+      });
     }
 
     const contentResponse = await handleContentRequest(request, env);
@@ -940,7 +1172,7 @@ export default {
         const settings = parseBooleanSettings(await request.json());
         if (!settings) return json({ error: 'All settings must be boolean values' }, 400);
 
-        await env.DB.prepare(
+        const update = await env.DB.prepare(
            `INSERT INTO wedding_settings (
               wedding_id, gallery_enabled, gallery_preview_enabled, gallery_download_enabled,
               guest_uploads_enabled,
@@ -961,18 +1193,29 @@ export default {
         )
           .bind(
             wedding.id,
-            Number(settings.galleryEnabled),
-            Number(settings.galleryPreviewEnabled),
-            Number(settings.galleryDownloadEnabled),
-            Number(settings.guestUploadsEnabled),
-            Number(settings.requireGuestApproval),
-            Number(settings.photoboothAutoApprove),
-            Number(settings.scheduleEnabled),
-            Number(settings.locationsEnabled),
-            Number(settings.infoEnabled),
+            settings.galleryEnabled,
+            settings.galleryPreviewEnabled,
+            settings.galleryDownloadEnabled,
+            settings.guestUploadsEnabled,
+            settings.requireGuestApproval,
+            settings.photoboothAutoApprove,
+            settings.scheduleEnabled,
+            settings.locationsEnabled,
+            settings.infoEnabled,
           )
           .run();
-        return json(settings);
+        if (update.meta.changes !== 1) {
+          throw new Error('PostgreSQL did not persist wedding settings');
+        }
+        const persistedRow = update.results[0] as unknown as WeddingSettingsRow | undefined;
+        if (!persistedRow || persistedRow.wedding_id !== wedding.id) {
+          throw new Error('PostgreSQL did not return the persisted wedding settings');
+        }
+        const persisted = serializeWeddingSettings(persistedRow);
+        const matchesRequested = (Object.keys(settings) as Array<keyof WeddingSettings>)
+          .every((key) => persisted[key] === settings[key]);
+        if (!matchesRequested) throw new Error('Wedding settings do not match the requested state');
+        return json(persisted);
       } catch (error) {
         if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body' }, 400);
         console.error('Unable to update wedding settings', error);
@@ -1045,6 +1288,9 @@ export default {
               mime_type, size_bytes, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'uploading')`,
         ).bind(uuid, wedding.id, assetType, filename, originalKey, mimeType, size).run();
+        if (result.meta.changes !== 1 || result.meta.last_row_id <= 0) {
+          throw new Error('PostgreSQL did not create the site asset record');
+        }
         return json({
           siteAssetId: result.meta.last_row_id,
           uuid,
@@ -1076,14 +1322,38 @@ export default {
           return json({ error: 'Uploaded object size does not match' }, 409);
         }
         if (asset.status !== 'ready') {
-          await env.DB.prepare(
+          const update = await env.DB.prepare(
             `UPDATE site_assets
              SET status = 'processing', uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
-             WHERE id = ? AND wedding_id = ?`,
-          ).bind(asset.id, wedding.id).run();
+             WHERE id = ? AND wedding_id = ? AND status = ?`,
+          ).bind(asset.id, wedding.id, asset.status).run();
+          if (update.meta.changes === 1) {
+            const persisted = update.results[0] as unknown as SiteAssetRow | undefined;
+            if (
+              !persisted
+              || persisted.id !== asset.id
+              || persisted.wedding_id !== wedding.id
+              || persisted.status !== 'processing'
+            ) {
+              throw new Error(`Site asset ${asset.id} did not reach processing status`);
+            }
+          } else {
+            const current = await findOwnedSiteAsset(env, wedding.id, asset.id);
+            if (!current) return json({ error: 'Site asset not found' }, 404);
+            if (current.status === 'ready' && current.optimized_key) {
+              return json({ siteAssetId: asset.id, status: 'ready', changed: false });
+            }
+            if (current.status !== 'processing') {
+              throw new Error(`PostgreSQL did not complete site asset ${asset.id}`);
+            }
+          }
           await env.MEDIA_PROCESSING_QUEUE.send({ kind: 'site_asset', siteAssetId: asset.id });
         }
-        return json({ siteAssetId: asset.id, status: asset.status === 'ready' ? 'ready' : 'processing' });
+        return json({
+          siteAssetId: asset.id,
+          status: asset.status === 'ready' ? 'ready' : 'processing',
+          changed: asset.status !== 'ready' && asset.status !== 'processing',
+        });
       } catch (error) {
         console.error('Unable to complete site asset upload', error);
         return json({ error: 'Unable to complete site asset upload' }, 500);
@@ -1115,7 +1385,7 @@ export default {
       try {
         const wedding = await findCurrentWedding(env);
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
-        return await deleteOwnedSiteAsset(env, wedding.id, siteAssetId)
+        return await deleteOwnedSiteAsset(env, wedding, siteAssetId)
           ? json({ id: siteAssetId, deleted: true })
           : json({ error: 'Site asset not found' }, 404);
       } catch (error) {
@@ -1191,11 +1461,11 @@ export default {
             .all<MediaRow>(),
           env.DB.prepare(
             `SELECT COUNT(*) AS total,
-                    COALESCE(SUM(status = 'pending'), 0) AS pending,
-                    COALESCE(SUM(status = 'approved'), 0) AS approved,
-                    COALESCE(SUM(status = 'hidden'), 0) AS hidden,
-                    COALESCE(SUM(mime_type LIKE 'image/%'), 0) AS photos,
-                    COALESCE(SUM(mime_type LIKE 'video/%'), 0) AS videos,
+                    COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                    COUNT(*) FILTER (WHERE status = 'approved') AS approved,
+                    COUNT(*) FILTER (WHERE status = 'hidden') AS hidden,
+                    COUNT(*) FILTER (WHERE mime_type LIKE 'image/%') AS photos,
+                    COUNT(*) FILTER (WHERE mime_type LIKE 'video/%') AS videos,
                     COALESCE(SUM(size_bytes), 0) AS storage_bytes
              FROM media
              WHERE wedding_id = ?`,
@@ -1319,33 +1589,28 @@ export default {
           return json({ error: 'Configured wedding not found' }, 404);
         }
 
-        const media = await env.DB.prepare(
-          'SELECT id, wedding_id, status FROM media WHERE id = ? AND wedding_id = ? LIMIT 1',
-        )
-          .bind(mediaId, wedding.id)
-          .first<Pick<MediaRow, 'id' | 'wedding_id' | 'status'>>();
-
-        if (!media) {
-          return json({ error: 'Media not found' }, 404);
-        }
-
         const allowedStatuses = action === 'approve'
           ? new Set(['pending', 'approved'])
           : action === 'restore'
             ? new Set(['hidden'])
             : new Set(['pending', 'approved', 'hidden']);
-        if (!allowedStatuses.has(media.status)) {
+        const nextStatus = action === 'hide' ? 'hidden' : 'approved';
+        const outcome = await setOwnedMediaStatus(
+          env, wedding.id, mediaId, nextStatus, allowedStatuses, action !== 'hide',
+        );
+        if (outcome === 'not_found') return json({ error: 'Media not found' }, 404);
+        if (outcome === 'invalid_status') {
           return json({ error: 'Media status is not valid for this action' }, 409);
         }
-
-        const nextStatus = action === 'hide' ? 'hidden' : 'approved';
-        if (media.status !== nextStatus) {
-          await env.DB.prepare('UPDATE media SET status = ? WHERE id = ? AND wedding_id = ?')
-            .bind(nextStatus, media.id, wedding.id)
-            .run();
+        if (outcome === 'preview_not_ready') {
+          return json({ error: 'Image preview is not ready', code: 'preview_not_ready', mediaId }, 409);
         }
 
-        return json({ mediaId: media.id, status: nextStatus });
+        return json({
+          mediaId,
+          status: nextStatus,
+          changed: outcome === 'updated',
+        });
       } catch (error) {
         console.error('Unable to moderate media', error);
         return json({ error: 'Unable to moderate media' }, 500);
@@ -1377,28 +1642,46 @@ export default {
         }
 
         let affected = 0;
-        await runLimited(ids, 3, async (mediaId) => {
-          if (action === 'delete') {
-            if (await deleteOwnedMedia(env, wedding.id, mediaId)) affected += 1;
-            return;
-          }
+        const deletedIds: number[] = [];
+        let eligibleIds: number[] = [];
+        let updatedIds: number[] = [];
+        let unchangedIds: number[] = [];
+        const previewNotReadyIds: number[] = [];
+        const skippedIds: number[] = [];
+        const notFoundIds: number[] = [];
+        if (action === 'delete') {
+          await runLimited(ids, 3, async (mediaId) => {
+            if (await deleteOwnedMedia(env, wedding, mediaId)) {
+              affected += 1;
+              deletedIds.push(mediaId);
+            } else notFoundIds.push(mediaId);
+          });
+        } else {
+          const mutation = await bulkSetOwnedMediaStatus(env, wedding.id, ids, action);
+          eligibleIds = mutation.eligibleIds;
+          updatedIds = mutation.updatedIds;
+          unchangedIds = mutation.unchangedIds;
+          previewNotReadyIds.push(...mutation.previewNotReadyIds);
+          skippedIds.push(...mutation.skippedIds);
+          notFoundIds.push(...mutation.notFoundIds);
+          affected = updatedIds.length;
+        }
 
-          const media = await findOwnedMedia(env, wedding.id, mediaId);
-          if (!media) return;
-          const allowed = action === 'approve'
-            ? new Set(['pending', 'approved'])
-            : new Set(['pending', 'approved', 'hidden']);
-          if (!allowed.has(media.status)) return;
-          const nextStatus = action === 'approve' ? 'approved' : 'hidden';
-          if (media.status !== nextStatus) {
-            await env.DB.prepare('UPDATE media SET status = ? WHERE id = ? AND wedding_id = ?')
-              .bind(nextStatus, media.id, wedding.id)
-              .run();
-          }
-          affected += 1;
+        return json({
+          action,
+          weddingId: wedding.id,
+          requested: ids.length,
+          requestedIds: ids,
+          eligibleIds,
+          changed: affected,
+          rowCount: action === 'delete' ? deletedIds.length : updatedIds.length,
+          deletedIds,
+          updatedIds,
+          unchangedIds,
+          previewNotReadyIds,
+          skippedIds,
+          notFoundIds,
         });
-
-        return json({ action, affected });
       } catch (error) {
         if (error instanceof SyntaxError) return json({ error: 'Invalid JSON body' }, 400);
         console.error('Unable to run bulk media action', error);
@@ -1419,7 +1702,7 @@ export default {
           return json({ error: 'Current wedding is not configured' }, 500);
         }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
-        if (!await deleteOwnedMedia(env, wedding.id, mediaId)) {
+        if (!await deleteOwnedMedia(env, wedding, mediaId)) {
           return json({ error: 'Media not found' }, 404);
         }
         return json({ mediaId, deleted: true });
@@ -1457,7 +1740,7 @@ export default {
           const ids = batch.results.map((row) => row.id);
           if (ids.length === 0) break;
           await runLimited(ids, 3, async (mediaId) => {
-            if (await deleteOwnedMedia(env, wedding.id, mediaId)) deleted += 1;
+            if (await deleteOwnedMedia(env, wedding, mediaId)) deleted += 1;
           });
         }
 
@@ -1531,6 +1814,9 @@ export default {
             mimeType.startsWith('video/') ? 'not_applicable' : 'pending',
           )
           .run();
+        if (result.meta.changes !== 1 || result.meta.last_row_id <= 0) {
+          throw new Error('PostgreSQL did not create the media record');
+        }
 
         return json(
           {
@@ -1575,13 +1861,13 @@ export default {
                   preview_generated_at, mime_type, size_bytes, width, height, sha256,
                   status, created_at, uploaded_at
            FROM media
-           WHERE id = ?
+           WHERE id = ? AND wedding_id = ?
            LIMIT 1`,
         )
-          .bind(mediaId)
+          .bind(mediaId, wedding.id)
           .first<MediaRow>();
 
-        if (!media || media.wedding_id !== wedding.id) {
+        if (!media) {
           return json({ error: 'Media not found' }, 404);
         }
 
@@ -1593,29 +1879,62 @@ export default {
           return json({ error: 'Uploaded object size does not match' }, 409);
         }
 
+        if (isImageMimeType(media.mime_type) && media.preview_status !== 'ready') {
+          await enqueueMediaPreview(env, media.id);
+        }
+
         let mediaStatus = media.status;
         if (media.status === 'uploading') {
           const nextStatus = completedMediaStatus(media.source, settings);
-          await env.DB.prepare(
+          const update = await env.DB.prepare(
             `UPDATE media
              SET status = ?, uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
              WHERE id = ? AND wedding_id = ? AND status = 'uploading'`,
           )
             .bind(nextStatus, media.id, wedding.id)
             .run();
-          mediaStatus = nextStatus;
+          if (update.meta.changes === 1) {
+            const completed = update.results[0] as unknown as MediaRow | undefined;
+            if (
+              !completed
+              || completed.id !== media.id
+              || completed.wedding_id !== wedding.id
+              || completed.status !== nextStatus
+              || !completed.uploaded_at
+            ) {
+              throw new Error(`Media ${media.id} did not reach status ${nextStatus}`);
+            }
+            mediaStatus = completed.status;
+          } else {
+            const completed = await findOwnedMedia(env, wedding.id, media.id);
+            if (!completed) return json({ error: 'Media not found' }, 404);
+            if (completed.status === 'uploading') {
+              throw new Error(`PostgreSQL did not complete media ${media.id}`);
+            }
+            mediaStatus = completed.status;
+          }
         }
 
-        if (isImageMimeType(media.mime_type) && media.preview_status !== 'ready') {
-          await env.MEDIA_PROCESSING_QUEUE.send({ mediaId: media.id });
-        } else if (!isImageMimeType(media.mime_type) && media.preview_status !== 'not_applicable') {
-          await env.DB.prepare(
+        if (!isImageMimeType(media.mime_type) && media.preview_status !== 'not_applicable') {
+          const update = await env.DB.prepare(
             `UPDATE media
              SET preview_status = 'not_applicable', preview_error = NULL
-             WHERE id = ?`,
+             WHERE id = ? AND wedding_id = ?`,
           )
-            .bind(media.id)
+            .bind(media.id, wedding.id)
             .run();
+          if (update.meta.changes === 1) {
+            const persisted = update.results[0] as unknown as MediaRow | undefined;
+            if (!persisted || persisted.preview_status !== 'not_applicable') {
+              throw new Error(`Media ${media.id} preview status was not updated`);
+            }
+          } else {
+            const current = await findOwnedMedia(env, wedding.id, media.id);
+            if (!current) return json({ error: 'Media not found' }, 404);
+            if (current.preview_status !== 'not_applicable') {
+              throw new Error(`Media ${media.id} preview status was not updated`);
+            }
+          }
         }
 
         return json({ mediaId: media.id, status: mediaStatus });
@@ -1877,7 +2196,29 @@ export default {
     return env.ASSETS.fetch(request);
   },
 
-  async queue(batch: MessageBatch<MediaProcessingMessage>, env: Env): Promise<void> {
+  async scheduled(_controller: ScheduledController, bindings: WorkerEnv): Promise<void> {
+    const env = withDatabase(bindings);
+    const stale = await env.DB.prepare(
+      `SELECT id
+       FROM media
+       WHERE mime_type LIKE 'image/%'
+         AND preview_status IN ('pending', 'processing')
+         AND created_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'
+       ORDER BY created_at, id
+       LIMIT ${MEDIA_PREVIEW_RECOVERY_LIMIT}`,
+    ).all<{ id: number }>();
+
+    await runLimited(stale.results, 3, async ({ id }) => {
+      try {
+        await enqueueMediaPreview(env, id);
+      } catch (error) {
+        console.error(`Unable to enqueue stale preview recovery for media ${id}`, error);
+      }
+    });
+  },
+
+  async queue(batch: MessageBatch<MediaProcessingMessage>, bindings: WorkerEnv): Promise<void> {
+    const env = withDatabase(bindings);
     for (const message of batch.messages) {
       if (message.body?.kind === 'site_asset') {
         const siteAssetId = message.body.siteAssetId;
@@ -1903,13 +2244,29 @@ export default {
         continue;
       }
 
+      if (message.attempts >= MEDIA_PREVIEW_MAX_DELIVERY_ATTEMPTS) {
+        try {
+          await markMediaPreviewDeliveryExhausted(env, mediaId, message.attempts);
+          message.ack();
+        } catch (error) {
+          console.error(`Unable to persist exhausted preview delivery for media ${mediaId}`, error);
+          message.retry({ delaySeconds: 300 });
+        }
+        continue;
+      }
+
       try {
         await processMediaPreview(env, mediaId);
         message.ack();
       } catch (error) {
         console.error(`Unable to generate previews for media ${mediaId}`, error);
+        try {
+          await markMediaPreviewFailed(env, mediaId, error);
+        } catch (statusError) {
+          console.error(`Unable to persist preview failure for media ${mediaId}`, statusError);
+        }
         message.retry({ delaySeconds: Math.min(300, 30 * Math.max(1, message.attempts)) });
       }
     }
   },
-} satisfies ExportedHandler<Env, MediaProcessingMessage>;
+} satisfies ExportedHandler<WorkerEnv, MediaProcessingMessage>;

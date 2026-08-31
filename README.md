@@ -1,131 +1,165 @@
 # Serena & Enrico — Wedding website
 
-Sito full-stack del matrimonio di Serena ed Enrico, aggiornato alla milestone M1. Il progetto usa un unico Cloudflare Worker: React/Vite genera il frontend statico, mentre lo stesso deployment gestisce le route `/api/*`, D1 e R2.
-
-M1 include Home, countdown, programma, location, informazioni utili e navigazione responsive. Il design system mobile-first usa Style Script, Cormorant Garamond e Inter, con palette avorio, salvia, oliva e champagne.
+Sito matrimonio multi-wedding full-stack: React/Vite viene servito dallo stesso
+Cloudflare Worker che gestisce API, upload R2, Queue e Cloudflare Images.
 
 ## Architettura
 
-- **Frontend:** React + TypeScript, mobile-first, compilato da Vite.
-- **Backend:** Cloudflare Worker TypeScript in `src/api/worker.ts`.
-- **Database:** Cloudflare D1, binding `DB`.
-- **Object storage:** Cloudflare R2, binding `MEDIA_BUCKET` (predisposto, non ancora usato).
-- **Routing:** gli URL `/api/*` passano al Worker; gli altri URL vengono serviti dagli asset Vite con fallback SPA.
+- **Frontend:** React + TypeScript + Vite, mobile-first.
+- **Backend:** Cloudflare Worker in `src/api/worker.ts`.
+- **Database applicativo:** Supabase PostgreSQL.
+- **Data layer:** adapter Worker-only in `src/lib/supabase-db.ts`; nessuna chiave
+  privilegiata viene inclusa nel browser.
+- **Autenticazione admin:** Supabase Auth email OTP, con sessione persistente.
+- **Autorizzazione:** `profiles.system_role = 'super_admin'` oppure membership
+  `wedding_members.role = 'wedding_admin'` per il matrimonio corrente.
+- **Media:** originali e preview restano nel bucket Cloudflare R2 EU
+  `wedding-media`; PostgreSQL conserva solo metadata e chiavi oggetto.
+- **Selezione wedding:** `CURRENT_WEDDING_SLUG` continua a determinare il
+  matrimonio pubblico e il contesto admin.
 
-Endpoint disponibili:
+Le migration D1 storiche sono conservate in `migrations/` come materiale di
+rollback/export. Il runtime non usa più il binding D1. Le migration attive sono
+in `supabase/migrations/`.
 
-- `GET /api/health` → `{ "status": "ok" }`
-- `GET /api/config` → legge `wedding_date` da D1
-- `GET /api/wedding/current` → restituisce il matrimonio attivo
-- `GET /api/weddings/:slug` → restituisce il matrimonio associato allo slug
+## Requisiti e sviluppo locale
 
-Il matrimonio mostrato dalla Home e restituito da `/api/wedding/current` è selezionato esplicitamente dalla variabile Worker non sensibile `CURRENT_WEDDING_SLUG`, configurata in `wrangler.jsonc`.
-
-## Requisiti
-
-- Node.js 22.13 o successivo
+- Node.js 22.13+
 - npm
-- un account Cloudflare solo per creare le risorse remote e distribuire
+- progetto Supabase
+- account Cloudflare con Worker, R2, Images e Queue già configurati
+- Supabase CLI per applicare le migration PostgreSQL
 
-Non servono credenziali Cloudflare per lo sviluppo locale.
+Copiando `.dev.vars.example` in `.dev.vars`, configurare:
 
-## Installazione
+```text
+SUPABASE_URL
+SUPABASE_ANON_KEY
+SUPABASE_DATABASE_URL
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+```
+
+`SUPABASE_DATABASE_URL` usa il ruolo PostgreSQL limitato `wedding_worker` ed è
+solo per sviluppo locale. In produzione il Worker usa il binding Hyperdrive.
+`/api/auth/config` restituisce al browser soltanto URL e anon key.
 
 ```bash
 npm install
-npm run db:migrate:local
 npm run dev
-```
-
-Aprire l'indirizzo mostrato da Vite (normalmente `http://localhost:5173`). Il plugin Cloudflare esegue frontend e Worker insieme: non occorrono due processi separati.
-
-La data è inclusa anche nel bundle come fallback, così la Home resta visibile se D1 locale non è ancora migrato; `/api/config` richiede invece la migration.
-
-## Sviluppo locale
-
-Il flusso consigliato è:
-
-```bash
-npm run db:migrate:local
-npm run dev
-```
-
-In alternativa, dopo una build si può eseguire il Worker direttamente con:
-
-```bash
-npm run build
-npx wrangler dev
-```
-
-Controlli rapidi mentre il server è attivo:
-
-```bash
-curl http://localhost:5173/api/health
-curl http://localhost:5173/api/config
-```
-
-Wrangler salva database e bucket locali sotto `.wrangler/`, esclusa da Git.
-
-## Build e controlli
-
-```bash
 npm run typecheck
 npm run lint
 npm run build
-npm run preview
 ```
 
-`npm run preview` è utile per il solo output frontend. Per verificare anche le API della build usare `npx wrangler dev`.
+## Schema e sicurezza Supabase
 
-## Configurazione D1
-
-Il progetto è collegato al database D1 remoto esistente `wedding-db`. Per applicare le migration:
+Applicare `supabase/migrations/20260831000000_initial_schema.sql` con il flusso
+Supabase CLI del progetto:
 
 ```bash
-npm run db:migrate:remote
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npm run supabase:db:push
 ```
 
-La migration `migrations/0001_initial.sql` crea `app_config` e inserisce `wedding_date = 2027-07-24`; resta disponibile per compatibilità M0/M1. La migration `migrations/0002_weddings.sql` introduce il modello wedding predisposto al futuro supporto multi-matrimonio e inserisce Serena ed Enrico come matrimonio attivo.
+La migration crea tutte le tabelle applicative D1 equivalenti, usando tipi
+PostgreSQL (`date`, `timestamptz`, `boolean`, `uuid`, identity `bigint`), più:
 
-## Configurazione R2
+- `profiles`, per il ruolo globale `super_admin`;
+- `wedding_members`, per assegnare `wedding_admin` a uno specifico wedding;
+- una RPC backend revocata ad `anon` e `authenticated`, usata dall'adapter del
+  Worker con service role;
+- RLS su tutte le tabelle applicative. I client anon/authenticated non hanno
+  policy di scrittura. Ogni utente autenticato può leggere solo il proprio
+  profilo e le proprie membership; il Worker media le API pubbliche e admin.
 
-Il progetto è collegato esplicitamente al bucket R2 esistente `wedding-media` con jurisdiction `eu`. Il binding `MEDIA_BUCKET` è disponibile al Worker. Il deploy disabilita inoltre il provisioning automatico di Wrangler. M1 non espone upload, lettura pubblica o credenziali R2. Nessuna chiave o secret deve essere aggiunta al repository.
+## Supabase Auth e primo amministratore
 
-## Deployment
+L'admin usa email OTP, senza password. Nel template email Supabase Auth deve
+essere presente `{{ .Token }}` affinché venga inviato il codice numerico.
 
-Dopo aver verificato l'autenticazione Wrangler e applicato la migration remota:
+1. Creare/invitare l'utente in Supabase Auth.
+2. Recuperarne l'UUID da `auth.users`.
+3. Creare il primo super admin dal SQL Editor:
+
+```sql
+INSERT INTO public.profiles (user_id, system_role)
+VALUES ('AUTH_USER_UUID', 'super_admin')
+ON CONFLICT (user_id) DO UPDATE
+SET system_role = EXCLUDED.system_role, updated_at = now();
+```
+
+Per limitare un amministratore a un matrimonio:
+
+```sql
+INSERT INTO public.profiles (user_id) VALUES ('AUTH_USER_UUID')
+ON CONFLICT (user_id) DO NOTHING;
+
+INSERT INTO public.wedding_members (wedding_id, user_id, role)
+SELECT id, 'AUTH_USER_UUID', 'wedding_admin'
+FROM public.weddings WHERE slug = 'serena-enrico-2027'
+ON CONFLICT (wedding_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+```
+
+Il Worker verifica il bearer token chiamando Supabase Auth e poi controlla il
+ruolo in PostgreSQL. Essere autenticati non conferisce automaticamente accesso
+admin.
+
+## Migrazione dati D1 → PostgreSQL
+
+Non eliminare o modificare D1 durante la transizione. Dopo aver applicato lo
+schema Supabase, esportare e importare i dati con:
+
+```bash
+# PowerShell
+$env:SUPABASE_URL='https://YOUR_PROJECT.supabase.co'
+$env:SUPABASE_SERVICE_ROLE_KEY='SERVER_ONLY_KEY'
+npm run data:migrate:supabase
+```
+
+Lo script `scripts/migrate-d1-to-supabase.mjs`:
+
+1. legge in sola lettura ogni tabella tramite Wrangler D1 remoto;
+2. converte flag 0/1 in boolean e normalizza i timestamp;
+3. verifica che le tabelle target siano vuote, poi importa preservando ID e relazioni;
+4. riallinea le sequence PostgreSQL;
+5. non modifica né cancella D1 e non tocca gli oggetti R2.
+
+Eseguire il passaggio prima su Supabase staging, confrontare i conteggi per
+tabella e mantenere D1 disponibile finché API pubbliche, admin, media e Queue
+non sono stati verificati.
+
+## Cloudflare e deploy
+
+Impostare le variabili server-side sul Worker esistente:
+
+```bash
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_ANON_KEY
+```
+
+Creare una configurazione Hyperdrive verso Supabase usando il ruolo PostgreSQL
+`wedding_worker`, quindi aggiungere al Worker il binding `HYPERDRIVE`. La service
+role serve soltanto allo script di import e non va configurata sul Worker.
+Restano necessari i secret R2 esistenti. `wrangler.jsonc` conserva R2 EU,
+Images, Queue, Assets e `CURRENT_WEDDING_SLUG`, ma non contiene più D1.
 
 ```bash
 npm run deploy
 ```
 
-Wrangler crea o aggiorna il Worker `serena-enrico-wedding` e pubblica gli asset del frontend nello stesso deployment.
+Prima del go-live va rimossa o resa bypass l'applicazione Cloudflare Access sui
+path `/admin*` e `/api/admin/*`; altrimenti ci sarebbe una doppia autenticazione.
+La protezione applicativa rimane Supabase Auth più controllo ruolo server-side.
 
-## Struttura delle cartelle
+## Preparazione FantaSposi
+
+Questo task non introduce tabelle o funzioni FantaSposi. Lo schema separa già:
 
 ```text
-src/
-  frontend/       # entry React, Home e stile globale
-  api/            # Worker e route API
-  components/     # componenti React riutilizzabili
-  lib/            # client API e utilità condivise
-migrations/       # migration D1 versionate
-public/           # asset statici futuri
-photobooth/       # placeholder per la futura integrazione Linux
+auth.users → profiles / wedding_members → weddings
 ```
 
-I file principali alla radice sono `wrangler.jsonc`, `vite.config.ts`, `tsconfig.json`, `eslint.config.js` e `index.html`.
-
-## Fuori scope per M1
-
-Non sono ancora implementati login, RSVP, upload o URL firmati, gallery, area admin, sync Photobooth, Turnstile e Fantasposi. Non esistono ancora tabelle guest, media o RSVP. Il bucket R2 è soltanto configurato come binding.
-
-## Convenzioni multi-wedding future
-
-Le future tabelle legate a invitati, RSVP e media dovranno contenere `wedding_id` come foreign key verso `weddings.id`. Gli oggetti nel bucket R2 dovranno essere separati per matrimonio usando il namespace `weddings/{wedding-slug}/...`.
-
-## Dati da completare nelle prossime milestone
-
-- aggiungere indirizzi e link reali per Chiesetta di Cendrole e Villa Peggy's;
-- definire parcheggio, contatti, dress code ed eventuali servizi di navetta/pernottamento;
-- definire i requisiti dati e privacy per invitati e media prima di estendere lo schema.
+Le future entità player e gameplay potranno riferirsi sia all'account Supabase
+sia allo specifico matrimonio senza hardcoding di Serena ed Enrico.

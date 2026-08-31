@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AdminImage } from './AdminImage';
+import { adminFetch } from './adminApi';
 import { SiteAssetLibrary } from './SiteAssetLibrary';
 import { SiteAssetPicker } from './SiteAssetPicker';
 import type { SiteAsset } from './siteAssets';
@@ -110,13 +112,13 @@ const categoryLabels: Record<string, string> = {
 async function adminRequest<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'manual' });
+    response = await adminFetch(url, init);
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'errore di rete';
     throw new Error(`${url}: richiesta non completata (${detail}).`);
   }
   if (response.type === 'opaqueredirect') {
-    throw new Error(`${url}: autenticazione Cloudflare Access richiesta (redirect).`);
+    throw new Error(`${url}: autenticazione richiesta (redirect).`);
   }
   if (response.status === 401 || response.status === 403) {
     throw new Error(`${url}: HTTP ${response.status}. La sessione amministratore è scaduta. Ricarica la pagina.`);
@@ -407,7 +409,7 @@ export function AdminContent() {
           <label className="admin-content-form__wide">Sottotitolo hero<textarea maxLength={300} value={wedding.heroSubtitle} onChange={(event) => setWedding((current) => ({ ...current, heroSubtitle: event.target.value }))} /></label>
           <div className="admin-photo-field admin-content-form__wide">
             <span>Foto hero</span>
-            {wedding.heroPhoto && <img src={wedding.heroPhoto.thumbnailUrl} alt="Anteprima hero selezionata" />}
+            {wedding.heroPhoto && <AdminImage source={wedding.heroPhoto.thumbnailUrl} alt="Anteprima hero selezionata" />}
             <div>
               <button type="button" onClick={() => setPickerTarget('hero')}>{wedding.heroPhoto ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
               {wedding.heroPhoto && <button type="button" onClick={() => setWedding((current) => ({ ...current, heroSiteAssetId: null, heroPhoto: null }))}>Rimuovi foto</button>}
@@ -441,7 +443,7 @@ export function AdminContent() {
                 <label className="admin-content-form__wide">Testo<textarea maxLength={5000} value={storyDraft.body ?? ''} onChange={(event) => setStoryDraft({ ...storyDraft, body: event.target.value })} /></label>
                 <div className="admin-photo-field admin-content-form__wide">
                   <span>Foto momento</span>
-                  {storyDraft.photo && <img src={storyDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${storyDraft.title || 'il momento'}`} />}
+                  {storyDraft.photo && <AdminImage source={storyDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${storyDraft.title || 'il momento'}`} />}
                   <div>
                     <button type="button" onClick={() => setPickerTarget('storyItem')}>{storyDraft.photo ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
                     {storyDraft.photo && <button type="button" onClick={() => setStoryDraft({ ...storyDraft, photoMediaId: null, photoSiteAssetId: null, photo: null })}>Rimuovi foto</button>}
@@ -456,7 +458,7 @@ export function AdminContent() {
               <div className="admin-story-list">
                 {storyItems.map((item, index) => (
                   <article key={item.id} className={item.photo ? 'has-photo' : ''}>
-                    {item.photo && <img src={item.photo.thumbnailUrl} alt="" loading="lazy" decoding="async" />}
+                    {item.photo && <AdminImage source={item.photo.thumbnailUrl} alt="" loading="lazy" decoding="async" />}
                     <div className="admin-story-list__content">
                       <span data-enabled={item.enabled}>{item.enabled ? 'Visibile' : 'Nascosto'} · Step {index + 1}</span>
                       {item.yearLabel && <p>{item.yearLabel}</p>}
@@ -510,7 +512,7 @@ export function AdminContent() {
               <label className="admin-content-form__wide">Descrizione<textarea maxLength={1200} value={locationDraft.description ?? ''} onChange={(event) => setLocationDraft({ ...locationDraft, description: event.target.value })} /></label>
               <div className="admin-photo-field admin-content-form__wide">
                 <span>Foto location</span>
-                {locationDraft.photo && <img src={locationDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${locationDraft.name || 'la location'}`} />}
+                {locationDraft.photo && <AdminImage source={locationDraft.photo.thumbnailUrl} alt={`Foto selezionata per ${locationDraft.name || 'la location'}`} />}
                 <div>
                   <button type="button" onClick={() => setPickerTarget('location')}>{locationDraft.photo ? 'Cambia foto' : 'Seleziona o carica foto'}</button>
                   {locationDraft.photo && <button type="button" onClick={() => setLocationDraft({ ...locationDraft, photoMediaId: null, photoSiteAssetId: null, photo: null })}>Rimuovi foto</button>}

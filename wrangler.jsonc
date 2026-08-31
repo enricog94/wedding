@@ -1,51 +1,59 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "serena-enrico-wedding",
-  "main": "src/api/worker.ts",
-  "compatibility_date": "2026-05-22",
-  "vars": {
-    "CURRENT_WEDDING_SLUG": "serena-enrico-2027",
-    "R2_ACCOUNT_ID": "60c876aaa5b66655a1bd923112d1db09",
-    "TEAM_DOMAIN": "https://enryserehome.cloudflareaccess.com"
-  },
-  "assets": {
-    "directory": "./dist/client",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "wedding-db",
-      "database_id": "ceeb4491-b54f-45b5-b8f9-320a285de034",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA_BUCKET",
-      "bucket_name": "wedding-media",
-      "jurisdiction": "eu"
-    }
-  ],
-  "images": {
-    "binding": "IMAGES"
-  },
-  "queues": {
-    "producers": [
-      {
-        "binding": "MEDIA_PROCESSING_QUEUE",
-        "queue": "wedding-media-processing"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "wedding-media-processing",
-        "max_batch_size": 5,
-        "max_batch_timeout": 5,
-        "max_retries": 3
-      }
-    ]
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "serena-enrico-wedding",
+	"main": "src/api/worker.ts",
+	"compatibility_date": "2026-05-22",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"vars": {
+		"CURRENT_WEDDING_SLUG": "serena-enrico-2027",
+		"R2_ACCOUNT_ID": "60c876aaa5b66655a1bd923112d1db09"
+	},
+	"assets": {
+		"directory": "./dist/client",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": [
+			"/api/*"
+		]
+	},
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "wedding-media",
+			"jurisdiction": "eu"
+		}
+	],
+	"images": {
+		"binding": "IMAGES"
+	},
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
+	},
+	"queues": {
+		"producers": [
+			{
+				"binding": "MEDIA_PROCESSING_QUEUE",
+				"queue": "wedding-media-processing"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "wedding-media-processing",
+				"max_batch_size": 1,
+				"max_concurrency": 1,
+				"max_batch_timeout": 5,
+				"max_retries": 3
+			}
+		]
+	},
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "bce7ca74f65340608cc81b3cb4b05e4c"
+		}
+	]
 }

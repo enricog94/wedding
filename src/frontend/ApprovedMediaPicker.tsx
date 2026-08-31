@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { AdminImage } from './AdminImage';
+import { adminFetch } from './adminApi';
 
 export type ApprovedMedia = {
   id: number;
@@ -19,9 +21,9 @@ type ApprovedMediaPickerProps = {
 
 async function loadApprovedImages(): Promise<ApprovedMedia[]> {
   const endpoint = '/api/admin/media?status=approved';
-  const response = await fetch(endpoint, { credentials: 'same-origin', redirect: 'manual' });
+  const response = await adminFetch(endpoint);
   if (response.type === 'opaqueredirect') {
-    throw new Error(`${endpoint}: autenticazione Cloudflare Access richiesta (redirect).`);
+    throw new Error(`${endpoint}: autenticazione richiesta (redirect).`);
   }
   if (response.status === 401 || response.status === 403) {
     throw new Error(`${endpoint}: HTTP ${response.status}. La sessione amministratore è scaduta.`);
@@ -73,7 +75,7 @@ export function ApprovedMediaPicker({ selectedId, onSelect, onClose }: ApprovedM
         <div className="approved-media-picker__grid">
           {media.map((item) => (
             <article key={item.id} className={item.id === selectedId ? 'is-selected' : ''}>
-              <img src={item.thumbnailUrl ?? undefined} alt="" loading="lazy" decoding="async" />
+              {item.thumbnailUrl && <AdminImage source={item.thumbnailUrl} alt="" loading="lazy" decoding="async" />}
               <div>
                 <strong>{item.originalFilename || `Media ${item.id}`}</strong>
                 <span>{item.source} · {new Date(item.createdAt).toLocaleDateString('it-IT')}</span>

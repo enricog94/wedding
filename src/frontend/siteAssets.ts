@@ -1,3 +1,5 @@
+import { adminFetch } from './adminApi';
+
 export type SiteAssetType = 'hero' | 'story' | 'location' | 'info' | 'other';
 export type SiteAssetStatus = 'uploading' | 'processing' | 'ready' | 'failed';
 
@@ -26,13 +28,13 @@ export const SITE_ASSET_MAX_SIZE = 20 * 1024 * 1024;
 async function adminJson<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'manual' });
+    response = await adminFetch(url, init);
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'errore di rete';
     throw new Error(`${url}: richiesta non completata (${detail}).`);
   }
   if (response.type === 'opaqueredirect') {
-    throw new Error(`${url}: autenticazione Cloudflare Access richiesta.`);
+    throw new Error(`${url}: autenticazione richiesta.`);
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;

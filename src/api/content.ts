@@ -1,5 +1,7 @@
+import type { Database } from '../lib/supabase-db';
+
 export type ContentEnv = {
-  DB: D1Database;
+  DB: Database;
   CURRENT_WEDDING_SLUG: string;
 };
 
@@ -19,9 +21,9 @@ type ContentWeddingRow = {
 };
 
 type SectionSettingsRow = {
-  schedule_enabled: number;
-  locations_enabled: number;
-  info_enabled: number;
+  schedule_enabled: boolean;
+  locations_enabled: boolean;
+  info_enabled: boolean;
 };
 
 type ScheduleRow = {
@@ -32,7 +34,7 @@ type ScheduleRow = {
   subtitle: string | null;
   description: string | null;
   sort_order: number;
-  enabled: number;
+  enabled: boolean;
 };
 
 type LocationRow = {
@@ -46,14 +48,14 @@ type LocationRow = {
   photo_media_id: number | null;
   photo_site_asset_id: number | null;
   sort_order: number;
-  enabled: number;
+  enabled: boolean;
   photo_preview_status?: string | null;
   photo_site_asset_status?: string | null;
 };
 
 type HomeContentRow = {
   wedding_id: number;
-  story_enabled: number;
+  story_enabled: boolean;
   story_eyebrow: string | null;
   story_title: string | null;
   story_intro: string | null;
@@ -72,7 +74,7 @@ type StoryItemRow = {
   photo_media_id: number | null;
   photo_site_asset_id: number | null;
   sort_order: number;
-  enabled: number;
+  enabled: boolean;
   photo_preview_status?: string | null;
   photo_site_asset_status?: string | null;
 };
@@ -85,7 +87,7 @@ type InfoRow = {
   content: string | null;
   image_site_asset_id: number | null;
   sort_order: number;
-  enabled: number;
+  enabled: boolean;
 };
 
 type ScheduleInput = Omit<ScheduleRow, 'id' | 'wedding_id' | 'enabled' | 'sort_order'> & {
@@ -134,6 +136,15 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
+}
+
+function requireSingleChange(
+  result: { meta: { changes: number } },
+  operation: string,
+): void {
+  if (result.meta.changes !== 1) {
+    throw new Error(`PostgreSQL did not ${operation}`);
+  }
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -268,7 +279,7 @@ function serializeSchedule(row: ScheduleRow, admin = false) {
     title: row.title,
     subtitle: row.subtitle,
     description: row.description,
-    ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled === 1 } : {}),
+    ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled } : {}),
   };
 }
 
@@ -292,7 +303,7 @@ function serializeLocation(row: LocationRow, admin = false) {
       photoMediaId: row.photo_media_id,
       photoSiteAssetId: row.photo_site_asset_id,
     } : {}),
-    ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled === 1 } : {}),
+    ...(admin ? { sortOrder: row.sort_order, enabled: row.enabled } : {}),
   };
 }
 
@@ -314,14 +325,14 @@ function serializeStoryItem(row: StoryItemRow, admin = false) {
       photoMediaId: row.photo_media_id,
       photoSiteAssetId: row.photo_site_asset_id,
       sortOrder: row.sort_order,
-      enabled: row.enabled === 1,
+      enabled: row.enabled,
     } : {}),
   };
 }
 
 function serializeHomeContent(row: HomeContentRow | null, items: StoryItemRow[] = []) {
   return {
-    storyEnabled: row?.story_enabled === 1,
+    storyEnabled: row?.story_enabled === true,
     storyEyebrow: row?.story_eyebrow ?? null,
     storyTitle: row?.story_title ?? null,
     storyIntro: row?.story_intro ?? null,
@@ -333,7 +344,7 @@ function serializeHomeContent(row: HomeContentRow | null, items: StoryItemRow[] 
 
 function serializeHomeContentAdmin(row: HomeContentRow | null) {
   return {
-    storyEnabled: row?.story_enabled === 1,
+    storyEnabled: row?.story_enabled === true,
     storyEyebrow: row?.story_eyebrow ?? null,
     storyTitle: row?.story_title ?? null,
     storyIntro: row?.story_intro ?? null,
@@ -351,7 +362,7 @@ function serializeInfo(row: InfoRow, admin = false) {
     ...(admin ? {
       imageSiteAssetId: row.image_site_asset_id,
       sortOrder: row.sort_order,
-      enabled: row.enabled === 1,
+      enabled: row.enabled,
     } : {}),
   };
 }
@@ -510,7 +521,7 @@ async function listStoryItems(
      LEFT JOIN site_assets a
        ON a.id = s.photo_site_asset_id
       AND a.wedding_id = s.wedding_id
-     WHERE s.wedding_id = ?${publicOnly ? ' AND s.enabled = 1' : ''}
+     WHERE s.wedding_id = ?${publicOnly ? ' AND s.enabled = TRUE' : ''}
      ORDER BY s.sort_order, s.id`,
   ).bind(weddingId).all<StoryItemRow>();
   return result.results;
@@ -527,7 +538,7 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
     env.DB.prepare(
       `SELECT id, wedding_id, time_label, title, subtitle, description, sort_order, enabled
        FROM wedding_schedule
-       WHERE wedding_id = ? AND enabled = 1
+       WHERE wedding_id = ? AND enabled = TRUE
        ORDER BY sort_order, id`,
     ).bind(wedding.id).all<ScheduleRow>(),
     env.DB.prepare(
@@ -544,13 +555,13 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
        LEFT JOIN site_assets a
          ON a.id = l.photo_site_asset_id
         AND a.wedding_id = l.wedding_id
-       WHERE l.wedding_id = ? AND l.enabled = 1
+       WHERE l.wedding_id = ? AND l.enabled = TRUE
        ORDER BY l.sort_order, l.id`,
     ).bind(wedding.id).all<LocationRow>(),
     env.DB.prepare(
       `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
        FROM wedding_info_items
-       WHERE wedding_id = ? AND enabled = 1
+       WHERE wedding_id = ? AND enabled = TRUE
        ORDER BY sort_order, id`,
     ).bind(wedding.id).all<InfoRow>(),
   ]);
@@ -559,9 +570,9 @@ async function publicContent(env: ContentEnv, wedding: ContentWeddingRow): Promi
     wedding: {
       ...serializeWedding(wedding),
       sections: {
-        scheduleEnabled: settings?.schedule_enabled !== 0,
-        locationsEnabled: settings?.locations_enabled !== 0,
-        infoEnabled: settings?.info_enabled !== 0,
+        scheduleEnabled: settings?.schedule_enabled !== false,
+        locationsEnabled: settings?.locations_enabled !== false,
+        infoEnabled: settings?.info_enabled !== false,
       },
     },
     home: serializeHomeContent(home, storyItems),
@@ -590,7 +601,7 @@ async function handleWeddingAdmin(
   const heroSiteAssetId = optionalPositiveInteger(input, 'heroSiteAssetId');
   await validateReadySiteAsset(env, wedding.id, heroSiteAssetId);
 
-  await env.DB.prepare(
+  const weddingUpdate = await env.DB.prepare(
     `UPDATE weddings
      SET bride_name = ?, groom_name = ?, wedding_date = ?, hero_eyebrow = ?,
          hero_title = ?, hero_subtitle = ?, updated_at = CURRENT_TIMESTAMP
@@ -598,16 +609,30 @@ async function handleWeddingAdmin(
   )
     .bind(brideName, groomName, weddingDate, heroEyebrow, heroTitle, heroSubtitle, wedding.id)
     .run();
-  await env.DB.prepare(
+  requireSingleChange(weddingUpdate, `update wedding ${wedding.id}`);
+  const homeUpdate = await env.DB.prepare(
     `INSERT INTO wedding_home_content (wedding_id, hero_site_asset_id, updated_at)
      VALUES (?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(wedding_id) DO UPDATE SET
        hero_site_asset_id = excluded.hero_site_asset_id,
        updated_at = CURRENT_TIMESTAMP`,
   ).bind(wedding.id, heroSiteAssetId).run();
+  requireSingleChange(homeUpdate, `update home content for wedding ${wedding.id}`);
 
   const updated = await findCurrentWedding(env);
-  return json(serializeWedding(updated ?? wedding, true));
+  if (!updated || updated.id !== wedding.id) throw new Error(`Wedding ${wedding.id} was not found after update`);
+  if (
+    updated.bride_name !== brideName
+    || updated.groom_name !== groomName
+    || updated.wedding_date !== weddingDate
+    || updated.hero_eyebrow !== heroEyebrow
+    || updated.hero_title !== heroTitle
+    || updated.hero_subtitle !== heroSubtitle
+    || updated.hero_site_asset_id !== heroSiteAssetId
+  ) {
+    throw new Error(`Wedding ${wedding.id} does not match the requested state`);
+  }
+  return json(serializeWedding(updated, true));
 }
 
 async function handleHomeContent(
@@ -621,7 +646,7 @@ async function handleHomeContent(
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const content = parseHomeContent(await requestBody(request));
-  await env.DB.prepare(
+  const update = await env.DB.prepare(
     `INSERT INTO wedding_home_content (
        wedding_id, story_enabled, story_eyebrow, story_title, story_intro,
        story_quote, story_quote_author, updated_at
@@ -635,11 +660,14 @@ async function handleHomeContent(
        story_quote_author = excluded.story_quote_author,
        updated_at = CURRENT_TIMESTAMP`,
   ).bind(
-    weddingId, Number(content.storyEnabled), content.storyEyebrow, content.storyTitle,
+    weddingId, content.storyEnabled, content.storyEyebrow, content.storyTitle,
     content.storyIntro, content.storyQuote, content.storyQuoteAuthor,
   ).run();
+  requireSingleChange(update, `update home content for wedding ${weddingId}`);
 
-  return json(serializeHomeContentAdmin(await findHomeContent(env, weddingId)));
+  const persisted = await findHomeContent(env, weddingId);
+  if (!persisted) throw new Error(`Home content for wedding ${weddingId} was not found after update`);
+  return json(serializeHomeContentAdmin(persisted));
 }
 
 async function handleStoryItems(
@@ -669,11 +697,14 @@ async function handleStoryItems(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.yearLabel, item.title, item.body, item.photoMediaId, item.photoSiteAssetId,
-      item.sortOrder, Number(item.enabled),
+      item.sortOrder, item.enabled,
     ).run();
+    requireSingleChange(result, `create story item for wedding ${weddingId}`);
+    if (result.meta.last_row_id <= 0) throw new Error('PostgreSQL did not return the created story item ID');
     const created = (await listStoryItems(env, weddingId, false))
       .find((candidate) => candidate.id === result.meta.last_row_id);
-    return json(serializeStoryItem(created!, true), 201);
+    if (!created) throw new Error('Created story item was not found');
+    return json(serializeStoryItem(created, true), 201);
   }
 
   if (itemId === null) return json({ error: 'Not found' }, 404);
@@ -683,27 +714,33 @@ async function handleStoryItems(
   if (!existing) return json({ error: 'Story item not found' }, 404);
 
   if (request.method === 'DELETE') {
-    await env.DB.prepare('DELETE FROM wedding_story_items WHERE id = ? AND wedding_id = ?')
+    const deletion = await env.DB.prepare('DELETE FROM wedding_story_items WHERE id = ? AND wedding_id = ?')
       .bind(itemId, weddingId).run();
-    return json({ id: itemId, deleted: true });
+    const remaining = await env.DB.prepare(
+      'SELECT id FROM wedding_story_items WHERE id = ? AND wedding_id = ? LIMIT 1',
+    ).bind(itemId, weddingId).first<{ id: number }>();
+    if (remaining) throw new Error(`Story item ${itemId} still exists after deletion`);
+    return json({ id: itemId, deleted: true, changed: deletion.meta.changes === 1 });
   }
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseStoryItem(await requestBody(request));
   await validateApprovedImage(env, weddingId, item.photoMediaId);
   await validateReadySiteAsset(env, weddingId, item.photoSiteAssetId);
-  await env.DB.prepare(
+  const update = await env.DB.prepare(
     `UPDATE wedding_story_items
      SET year_label = ?, title = ?, body = ?, photo_media_id = ?, photo_site_asset_id = ?,
           sort_order = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
     item.yearLabel, item.title, item.body, item.photoMediaId, item.photoSiteAssetId, item.sortOrder,
-    Number(item.enabled), itemId, weddingId,
+    item.enabled, itemId, weddingId,
   ).run();
+  requireSingleChange(update, `update story item ${itemId}`);
   const updated = (await listStoryItems(env, weddingId, false))
     .find((candidate) => candidate.id === itemId);
-  return json(serializeStoryItem(updated!, true));
+  if (!updated) throw new Error(`Story item ${itemId} was not found after update`);
+  return json(serializeStoryItem(updated, true));
 }
 
 async function handleSchedule(
@@ -728,13 +765,16 @@ async function handleSchedule(
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.time_label, item.title, item.subtitle, item.description,
-      item.sortOrder, Number(item.enabled),
+      item.sortOrder, item.enabled,
     ).run();
+    requireSingleChange(result, `create schedule item for wedding ${weddingId}`);
+    if (result.meta.last_row_id <= 0) throw new Error('PostgreSQL did not return the created schedule item ID');
     const row = await env.DB.prepare(
       `SELECT id, wedding_id, time_label, title, subtitle, description, sort_order, enabled
        FROM wedding_schedule WHERE id = ? AND wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<ScheduleRow>();
-    return json(serializeSchedule(row!, true), 201);
+    if (!row) throw new Error('Created schedule item was not found');
+    return json(serializeSchedule(row, true), 201);
   }
 
   if (itemId === null) return json({ error: 'Not found' }, 404);
@@ -744,26 +784,32 @@ async function handleSchedule(
   if (!existing) return json({ error: 'Schedule item not found' }, 404);
 
   if (request.method === 'DELETE') {
-    await env.DB.prepare('DELETE FROM wedding_schedule WHERE id = ? AND wedding_id = ?')
+    const deletion = await env.DB.prepare('DELETE FROM wedding_schedule WHERE id = ? AND wedding_id = ?')
       .bind(itemId, weddingId).run();
-    return json({ id: itemId, deleted: true });
+    const remaining = await env.DB.prepare(
+      'SELECT id FROM wedding_schedule WHERE id = ? AND wedding_id = ? LIMIT 1',
+    ).bind(itemId, weddingId).first<{ id: number }>();
+    if (remaining) throw new Error(`Schedule item ${itemId} still exists after deletion`);
+    return json({ id: itemId, deleted: true, changed: deletion.meta.changes === 1 });
   }
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseSchedule(await requestBody(request));
-  await env.DB.prepare(
+  const update = await env.DB.prepare(
     `UPDATE wedding_schedule
      SET time_label = ?, title = ?, subtitle = ?, description = ?, sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
     item.time_label, item.title, item.subtitle, item.description, item.sortOrder,
-    Number(item.enabled), itemId, weddingId,
+    item.enabled, itemId, weddingId,
   ).run();
+  requireSingleChange(update, `update schedule item ${itemId}`);
   const row = await env.DB.prepare(
     `SELECT id, wedding_id, time_label, title, subtitle, description, sort_order, enabled
      FROM wedding_schedule WHERE id = ? AND wedding_id = ?`,
   ).bind(itemId, weddingId).first<ScheduleRow>();
-  return json(serializeSchedule(row!, true));
+  if (!row) throw new Error(`Schedule item ${itemId} was not found after update`);
+  return json(serializeSchedule(row, true));
 }
 
 async function handleLocations(
@@ -803,8 +849,10 @@ async function handleLocations(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.name, item.type, item.address, item.mapsUrl, item.description,
-      item.photo_media_id, item.photo_site_asset_id, item.sortOrder, Number(item.enabled),
+      item.photo_media_id, item.photo_site_asset_id, item.sortOrder, item.enabled,
     ).run();
+    requireSingleChange(result, `create location for wedding ${weddingId}`);
+    if (result.meta.last_row_id <= 0) throw new Error('PostgreSQL did not return the created location ID');
     const row = await env.DB.prepare(
       `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
               l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
@@ -815,7 +863,8 @@ async function handleLocations(
        LEFT JOIN site_assets a ON a.id = l.photo_site_asset_id AND a.wedding_id = l.wedding_id
        WHERE l.id = ? AND l.wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<LocationRow>();
-    return json(serializeLocation(row!, true), 201);
+    if (!row) throw new Error('Created location was not found');
+    return json(serializeLocation(row, true), 201);
   }
 
   if (itemId === null) return json({ error: 'Not found' }, 404);
@@ -825,24 +874,29 @@ async function handleLocations(
   if (!existing) return json({ error: 'Location not found' }, 404);
 
   if (request.method === 'DELETE') {
-    await env.DB.prepare('DELETE FROM wedding_locations WHERE id = ? AND wedding_id = ?')
+    const deletion = await env.DB.prepare('DELETE FROM wedding_locations WHERE id = ? AND wedding_id = ?')
       .bind(itemId, weddingId).run();
-    return json({ id: itemId, deleted: true });
+    const remaining = await env.DB.prepare(
+      'SELECT id FROM wedding_locations WHERE id = ? AND wedding_id = ? LIMIT 1',
+    ).bind(itemId, weddingId).first<{ id: number }>();
+    if (remaining) throw new Error(`Location ${itemId} still exists after deletion`);
+    return json({ id: itemId, deleted: true, changed: deletion.meta.changes === 1 });
   }
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseLocation(await requestBody(request));
   await validateApprovedImage(env, weddingId, item.photo_media_id);
   await validateReadySiteAsset(env, weddingId, item.photo_site_asset_id);
-  await env.DB.prepare(
+  const update = await env.DB.prepare(
     `UPDATE wedding_locations
      SET name = ?, type = ?, address = ?, maps_url = ?, description = ?, photo_media_id = ?,
           photo_site_asset_id = ?, sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
     item.name, item.type, item.address, item.mapsUrl, item.description,
-    item.photo_media_id, item.photo_site_asset_id, item.sortOrder, Number(item.enabled), itemId, weddingId,
+    item.photo_media_id, item.photo_site_asset_id, item.sortOrder, item.enabled, itemId, weddingId,
   ).run();
+  requireSingleChange(update, `update location ${itemId}`);
   const row = await env.DB.prepare(
     `SELECT l.id, l.wedding_id, l.name, l.type, l.address, l.maps_url, l.description,
             l.photo_media_id, l.photo_site_asset_id, l.sort_order, l.enabled,
@@ -853,7 +907,8 @@ async function handleLocations(
      LEFT JOIN site_assets a ON a.id = l.photo_site_asset_id AND a.wedding_id = l.wedding_id
      WHERE l.id = ? AND l.wedding_id = ?`,
   ).bind(itemId, weddingId).first<LocationRow>();
-  return json(serializeLocation(row!, true));
+  if (!row) throw new Error(`Location ${itemId} was not found after update`);
+  return json(serializeLocation(row, true));
 }
 
 async function handleInfo(
@@ -879,13 +934,16 @@ async function handleInfo(
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       weddingId, item.category, item.title, item.content, item.image_site_asset_id,
-      item.sortOrder, Number(item.enabled),
+      item.sortOrder, item.enabled,
     ).run();
+    requireSingleChange(result, `create info item for wedding ${weddingId}`);
+    if (result.meta.last_row_id <= 0) throw new Error('PostgreSQL did not return the created info item ID');
     const row = await env.DB.prepare(
       `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
        FROM wedding_info_items WHERE id = ? AND wedding_id = ?`,
     ).bind(result.meta.last_row_id, weddingId).first<InfoRow>();
-    return json(serializeInfo(row!, true), 201);
+    if (!row) throw new Error('Created info item was not found');
+    return json(serializeInfo(row, true), 201);
   }
 
   if (itemId === null) return json({ error: 'Not found' }, 404);
@@ -895,27 +953,33 @@ async function handleInfo(
   if (!existing) return json({ error: 'Info item not found' }, 404);
 
   if (request.method === 'DELETE') {
-    await env.DB.prepare('DELETE FROM wedding_info_items WHERE id = ? AND wedding_id = ?')
+    const deletion = await env.DB.prepare('DELETE FROM wedding_info_items WHERE id = ? AND wedding_id = ?')
       .bind(itemId, weddingId).run();
-    return json({ id: itemId, deleted: true });
+    const remaining = await env.DB.prepare(
+      'SELECT id FROM wedding_info_items WHERE id = ? AND wedding_id = ? LIMIT 1',
+    ).bind(itemId, weddingId).first<{ id: number }>();
+    if (remaining) throw new Error(`Info item ${itemId} still exists after deletion`);
+    return json({ id: itemId, deleted: true, changed: deletion.meta.changes === 1 });
   }
   if (request.method !== 'PUT') return json({ error: 'Method not allowed' }, 405);
 
   const item = parseInfo(await requestBody(request));
   await validateReadySiteAsset(env, weddingId, item.image_site_asset_id);
-  await env.DB.prepare(
+  const update = await env.DB.prepare(
     `UPDATE wedding_info_items
      SET category = ?, title = ?, content = ?, image_site_asset_id = ?, sort_order = ?, enabled = ?
      WHERE id = ? AND wedding_id = ?`,
   ).bind(
     item.category, item.title, item.content, item.image_site_asset_id,
-    item.sortOrder, Number(item.enabled), itemId, weddingId,
+    item.sortOrder, item.enabled, itemId, weddingId,
   ).run();
+  requireSingleChange(update, `update info item ${itemId}`);
   const row = await env.DB.prepare(
     `SELECT id, wedding_id, category, title, content, image_site_asset_id, sort_order, enabled
      FROM wedding_info_items WHERE id = ? AND wedding_id = ?`,
   ).bind(itemId, weddingId).first<InfoRow>();
-  return json(serializeInfo(row!, true));
+  if (!row) throw new Error(`Info item ${itemId} was not found after update`);
+  return json(serializeInfo(row, true));
 }
 
 export async function handleContentRequest(

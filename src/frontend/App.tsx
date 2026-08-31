@@ -9,7 +9,7 @@ import { TimelineItem } from '../components/TimelineItem';
 import { ThemeDecoration } from '../components/ThemeDecoration';
 import { DEFAULT_WEDDING_CONTENT, getWeddingContent } from '../lib/config';
 import { applyWeddingTheme, getWeddingTheme } from '../lib/themes';
-import { AdminPage } from './AdminPage';
+import { AdminAuth } from './AdminAuth';
 import { GalleryPage } from './GalleryPage';
 import { PhotoPage } from './PhotoPage';
 
@@ -101,7 +101,7 @@ export function App() {
         }}
         overHero={!isPhotoPage && !isGalleryPage && !isAdminPage}
       />
-      {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminPage /> : <main>
+      {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminAuth /> : <main>
         <div className="hero-viewport">
           <section id="home" className="hero hero--photo" aria-labelledby="wedding-title">
             <img

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AdminImage } from './AdminImage';
 import {
   deleteSiteAsset,
   listSiteAssets,
@@ -109,7 +110,7 @@ export function SiteAssetLibrary({
       <div className="site-asset-grid">
         {assets.map((asset) => (
           <article key={asset.id} className={asset.id === selectedId ? 'is-selected' : ''}>
-            {asset.viewUrl ? <img src={asset.viewUrl} alt="" loading="lazy" decoding="async" /> : <div className="site-asset-placeholder">{asset.status}</div>}
+            {asset.viewUrl ? <AdminImage source={asset.viewUrl} alt="" loading="lazy" decoding="async" /> : <div className="site-asset-placeholder">{asset.status}</div>}
             <div className="site-asset-card__body">
               <strong title={asset.originalFilename ?? undefined}>{asset.originalFilename || `Asset ${asset.id}`}</strong>
               <span>{assetTypeLabels[asset.assetType]} · {formatSize(asset.sizeBytes)}</span>

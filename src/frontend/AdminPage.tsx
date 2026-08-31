@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminContent } from './AdminContent';
+import { adminFetch } from './adminApi';
+import { useAdminImageUrl } from './useAdminImageUrl';
 
 type MediaStatus = 'uploading' | 'pending' | 'approved' | 'hidden';
 type MediaSource = 'guest' | 'photobooth' | 'admin';
@@ -16,6 +18,7 @@ type AdminMedia = {
   sizeBytes: number;
   status: MediaStatus;
   previewStatus: string;
+  previewError: string | null;
   thumbnailUrl: string | null;
   createdAt: string;
   uploadedAt: string | null;
@@ -65,14 +68,14 @@ const DEFAULT_SETTINGS: AdminSettings = {
 async function adminResponse(url: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(url, { ...init, credentials: 'same-origin', redirect: 'manual' });
+    response = await adminFetch(url, init);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     const detail = error instanceof Error ? error.message : 'errore di rete';
     throw new Error(`${url}: richiesta non completata (${detail}).`);
   }
   if (response.type === 'opaqueredirect') {
-    throw new Error(`${url}: autenticazione Cloudflare Access richiesta (redirect).`);
+    throw new Error(`${url}: autenticazione richiesta (redirect).`);
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -81,7 +84,6 @@ async function adminResponse(url: string, init?: RequestInit): Promise<Response>
   return response;
 }
 
-const previewableTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const statusLabels: Record<MediaStatus, string> = {
   uploading: 'In caricamento', pending: 'Pending', approved: 'Approvato', hidden: 'Nascosto',
 };
@@ -101,33 +103,44 @@ function formatDate(value: string | null): string {
 }
 
 function AdminPreview({ item }: { item: AdminMedia }) {
-  const originalFallback = previewableTypes.has(item.mimeType) ? `/api/admin/media/${item.id}/view` : null;
-  const preferredSource = item.previewStatus === 'ready' && item.thumbnailUrl
-    ? item.thumbnailUrl
-    : originalFallback;
-  const [source, setSource] = useState(preferredSource);
+  const thumbnailSource = item.previewStatus === 'ready' ? item.thumbnailUrl : null;
+  const source = useAdminImageUrl(thumbnailSource);
 
   if (source) {
-    return (
-      <img
-        src={source}
-        alt="Anteprima del media"
-        loading="lazy"
-        onError={() => {
-          if (source !== originalFallback) setSource(originalFallback);
-          else setSource(null);
-        }}
-      />
-    );
+    return <img src={source} alt="Anteprima del media" loading="lazy" />;
   }
 
   const isVideo = item.mimeType.startsWith('video/');
+  const placeholder = item.previewStatus === 'pending'
+    ? 'Anteprima in attesa'
+    : item.previewStatus === 'processing'
+      ? 'Elaborazione anteprima…'
+      : item.previewStatus === 'failed'
+        ? 'Elaborazione anteprima fallita'
+        : isVideo
+          ? 'Video'
+          : item.mimeType.includes('hei')
+            ? 'HEIC / HEIF'
+            : 'Anteprima non disponibile';
   return (
     <div className="admin-media__placeholder">
       <span aria-hidden="true">{isVideo ? '▶' : '✦'}</span>
-      <strong>{isVideo ? 'Video' : item.mimeType.includes('hei') ? 'HEIC / HEIF' : 'Anteprima non disponibile'}</strong>
+      <strong>{placeholder}</strong>
+      {item.previewStatus === 'failed' && item.previewError && <small>{item.previewError}</small>}
     </div>
   );
+}
+
+function hasReadyApprovalPreview(item: AdminMedia): boolean {
+  return !item.mimeType.startsWith('image/') || item.previewStatus === 'ready';
+}
+
+function canApprove(item: AdminMedia): boolean {
+  return item.status === 'pending' && hasReadyApprovalPreview(item);
+}
+
+function canRestore(item: AdminMedia): boolean {
+  return item.status === 'hidden' && hasReadyApprovalPreview(item);
 }
 
 type ToggleProps = {
@@ -147,7 +160,12 @@ function SettingsToggle({ checked, description, disabled, label, onChange }: Tog
   );
 }
 
-export function AdminPage() {
+type AdminPageProps = {
+  adminEmail?: string;
+  onLogout: () => void;
+};
+
+export function AdminPage({ adminEmail, onLogout }: AdminPageProps) {
   const [tab, setTab] = useState<AdminTab>('dashboard');
   const [statusFilter, setStatusFilter] = useState<'all' | MediaStatus>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | MediaSource>('all');
@@ -174,7 +192,9 @@ export function AdminPage() {
     setLoading(true);
     setMediaError('');
     try {
-      const response = await adminResponse(`/api/admin/media?${query}`);
+      const response = await adminResponse(`/api/admin/media?${query}&_=${Date.now()}`, {
+        cache: 'no-store',
+      });
       const result = await response.json() as AdminMediaResponse;
       setMedia(Array.isArray(result.media) ? result.media : []);
       setStats(result.stats ?? EMPTY_STATS);
@@ -213,8 +233,9 @@ export function AdminPage() {
   const moderate = async (id: number, action: MediaAction) => {
     setBusy(true); setFeedback(''); setActionError('');
     try {
-      await adminResponse(`/api/admin/media/${id}/${action}`, { method: 'POST' });
-      await finishAction('Media aggiornato correttamente.');
+      const response = await adminResponse(`/api/admin/media/${id}/${action}`, { method: 'POST' });
+      const result = await response.json() as { changed?: boolean };
+      await finishAction(result.changed === false ? 'Il media era già nello stato richiesto.' : 'Media aggiornato correttamente.');
     } catch (error) { setActionError(error instanceof Error ? error.message : 'Operazione non riuscita. Riprova.'); }
     finally { setBusy(false); }
   };
@@ -224,6 +245,12 @@ export function AdminPage() {
     setBusy(true); setFeedback(''); setActionError('');
     try {
       await adminResponse(`/api/admin/media/${item.id}`, { method: 'DELETE' });
+      setMedia((current) => current.filter((mediaItem) => mediaItem.id !== item.id));
+      setSelected((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
       await finishAction('Media eliminato definitivamente.');
     } catch (error) { setActionError(error instanceof Error ? error.message : 'Eliminazione non riuscita. Il media non è stato rimosso.'); }
     finally { setBusy(false); }
@@ -234,10 +261,46 @@ export function AdminPage() {
     if (action === 'delete' && !window.confirm(`Eliminare definitivamente ${ids.length} media selezionati?`)) return;
     setBusy(true); setFeedback(''); setActionError('');
     try {
-      await adminResponse('/api/admin/media/bulk', {
+      const response = await adminResponse('/api/admin/media/bulk', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids }),
       });
-      await finishAction(action === 'delete' ? 'Media selezionati eliminati.' : 'Media selezionati aggiornati.');
+      const result = await response.json() as {
+        deletedIds?: number[];
+        updatedIds?: number[];
+        unchangedIds?: number[];
+        previewNotReadyIds?: number[];
+        skippedIds?: number[];
+      };
+      if (action === 'delete') {
+        const deletedIds = new Set(result.deletedIds ?? []);
+        setMedia((current) => current.filter((item) => !deletedIds.has(item.id)));
+      } else {
+        const synchronizedIds = new Set([
+          ...(result.updatedIds ?? []),
+          ...(result.unchangedIds ?? []),
+        ]);
+        const nextStatus: MediaStatus = action === 'approve' ? 'approved' : 'hidden';
+        const visibleStatus = tab === 'dashboard' ? 'pending' : statusFilter;
+        setMedia((current) => current.flatMap((item) => {
+          if (!synchronizedIds.has(item.id)) return [item];
+          if (visibleStatus !== 'all' && visibleStatus !== nextStatus) return [];
+          return [{ ...item, status: nextStatus }];
+        }));
+      }
+      setSelected(new Set());
+      const changedCount = action === 'delete'
+        ? (result.deletedIds?.length ?? 0)
+        : (result.updatedIds?.length ?? 0);
+      const unchangedCount = result.unchangedIds?.length ?? 0;
+      const previewNotReadyCount = result.previewNotReadyIds?.length ?? 0;
+      const skippedCount = result.skippedIds?.length ?? 0;
+      const summary = [
+        `${changedCount} media ${action === 'delete' ? 'eliminati' : 'aggiornati'}`,
+        unchangedCount > 0 ? `${unchangedCount} già nello stato richiesto` : '',
+        previewNotReadyCount > 0 ? `${previewNotReadyCount} senza anteprima pronta` : '',
+        skippedCount > 0 ? `${skippedCount} ignorati` : '',
+      ].filter(Boolean).join(' · ');
+      await finishAction(`${summary}.`);
     } catch (error) { setActionError(error instanceof Error ? error.message : 'Operazione multipla non riuscita. Riprova.'); }
     finally { setBusy(false); }
   };
@@ -276,12 +339,20 @@ export function AdminPage() {
   });
 
   const allSelected = media.length > 0 && media.every((item) => selected.has(item.id));
+  const approvableMediaIds = media.filter(canApprove).map((item) => item.id);
+  const selectedApprovableIds = media
+    .filter((item) => selected.has(item.id) && canApprove(item))
+    .map((item) => item.id);
 
   return (
     <main className="admin-page">
       <header className="admin-header">
         <div><p>Serena &amp; Enrico</p><h1>Pannello matrimonio</h1></div>
-        <span className="admin-count" aria-label={`${stats.total} media totali`}>{stats.total}</span>
+        <div className="admin-header__session">
+          {adminEmail && <span>{adminEmail}</span>}
+          <button type="button" onClick={onLogout}>Esci</button>
+          <span className="admin-count" aria-label={`${stats.total} media totali`}>{stats.total}</span>
+        </div>
       </header>
 
       {tab === 'dashboard' && !loading && !mediaError && (
@@ -322,7 +393,7 @@ export function AdminPage() {
               </div>
             ) : <p>Controlla ogni contenuto prima di renderlo visibile nella gallery.</p>}
             {tab === 'dashboard' && media.length > 0 && (
-              <button type="button" onClick={() => void bulkAction('approve', media.map((item) => item.id))} disabled={busy}>Approva tutti</button>
+              <button type="button" onClick={() => void bulkAction('approve', approvableMediaIds)} disabled={busy || loading || approvableMediaIds.length === 0}>Approva tutti</button>
             )}
           </div>
 
@@ -331,7 +402,7 @@ export function AdminPage() {
               <label><input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(media.map((item) => item.id)))} /> Seleziona tutti</label>
               <span>{selected.size} selezionati</span>
               <div>
-                <button type="button" disabled={busy || selected.size === 0} onClick={() => void bulkAction('approve')}>Approva</button>
+                <button type="button" disabled={busy || selectedApprovableIds.length === 0} onClick={() => void bulkAction('approve', selectedApprovableIds)}>Approva</button>
                 <button type="button" disabled={busy || selected.size === 0} onClick={() => void bulkAction('hide')}>Nascondi</button>
                 <button type="button" className="admin-danger" disabled={busy || selected.size === 0} onClick={() => void bulkAction('delete')}>Elimina selezionati</button>
               </div>
@@ -346,7 +417,7 @@ export function AdminPage() {
               {media.map((item) => (
                 <article className="admin-media" key={item.id}>
                   {tab === 'gallery' && <label className="admin-media__select"><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggleSelected(item.id)} /><span className="sr-only">Seleziona {item.originalFilename || `media ${item.id}`}</span></label>}
-                  <div className="admin-media__preview"><AdminPreview key={`${item.id}-${item.thumbnailUrl ?? 'original'}`} item={item} /></div>
+                  <div className="admin-media__preview"><AdminPreview key={`${item.id}-${item.previewStatus}-${item.thumbnailUrl ?? 'placeholder'}`} item={item} /></div>
                   <div className="admin-media__body">
                     <div className="admin-media__title"><h2 title={item.originalFilename ?? undefined}>{item.originalFilename || 'File senza nome'}</h2><span data-status={item.status}>{statusLabels[item.status]}</span></div>
                     <dl>
@@ -354,9 +425,9 @@ export function AdminPage() {
                       <div><dt>Caricato</dt><dd>{formatDate(item.uploadedAt ?? item.createdAt)}</dd></div><div><dt>Origine</dt><dd>{item.source}</dd></div>
                     </dl>
                     <div className="admin-media__actions">
-                      {item.status === 'pending' && <button type="button" disabled={busy} onClick={() => void moderate(item.id, 'approve')}>Approva</button>}
+                      {item.status === 'pending' && <button type="button" disabled={busy || !canApprove(item)} title={!canApprove(item) ? 'Attendi che la preview sia pronta' : undefined} onClick={() => void moderate(item.id, 'approve')}>Approva</button>}
                       {(item.status === 'pending' || item.status === 'approved') && <button type="button" disabled={busy} onClick={() => void moderate(item.id, 'hide')}>Nascondi</button>}
-                      {item.status === 'hidden' && <button type="button" disabled={busy} onClick={() => void moderate(item.id, 'restore')}>Ripristina</button>}
+                      {item.status === 'hidden' && <button type="button" disabled={busy || !canRestore(item)} title={!canRestore(item) ? 'Attendi che la preview sia pronta' : undefined} onClick={() => void moderate(item.id, 'restore')}>Ripristina</button>}
                       <button type="button" className="admin-danger" disabled={busy} onClick={() => void removeMedia(item)}>Elimina</button>
                     </div>
                   </div>

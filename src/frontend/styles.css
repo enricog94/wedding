@@ -1317,6 +1317,69 @@ button.gallery-item:hover .gallery-item__image {
   background: color-mix(in srgb, var(--color-text) 88%, transparent);
 }
 
+.admin-login {
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  padding: 2rem 1rem;
+  background: var(--color-paper);
+}
+
+.admin-login__panel {
+  width: min(100%, 28rem);
+  border: 1px solid var(--color-line);
+  padding: clamp(2rem, 7vw, 3rem);
+  background: var(--color-background);
+}
+
+.admin-login__panel h1 {
+  margin: 0.5rem 0 1rem;
+  font: 500 clamp(2.25rem, 10vw, 3.4rem)/1 var(--font-display);
+}
+
+.admin-login__panel form,
+.admin-login__panel label {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-login__panel form {
+  gap: 1rem;
+  margin-top: 1.75rem;
+}
+
+.admin-login__panel input {
+  min-height: 3rem;
+  border: 1px solid var(--color-line);
+  padding: 0.75rem;
+  font: inherit;
+  background: var(--color-paper);
+}
+
+.admin-login__panel button,
+.admin-header__session button {
+  min-height: 2.75rem;
+  border: 1px solid var(--color-olive);
+  padding: 0.7rem 1rem;
+  color: var(--color-paper);
+  background: var(--color-olive);
+  font: 600 0.72rem/1 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.admin-header__session {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.admin-header__session > span:first-child {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
 .admin-page {
   min-height: 100svh;
   padding: calc(var(--header-height) + 2rem) 1rem 5rem;
@@ -1607,6 +1670,13 @@ button.gallery-item:hover .gallery-item__image {
 
 .admin-media__placeholder strong {
   font: 500 1.35rem/1 var(--font-display);
+}
+
+.admin-media__placeholder small {
+  max-width: min(90%, 18rem);
+  color: var(--color-error);
+  font: 500 0.72rem/1.45 var(--font-body);
+  overflow-wrap: anywhere;
 }
 
 .admin-media__body {
