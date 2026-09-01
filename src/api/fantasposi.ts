@@ -51,6 +51,9 @@ type MissionRow = {
   points: number;
   active: boolean;
   sort_order: number;
+  opens_at: string | null;
+  closes_at: string | null;
+  effective_status: 'inactive' | 'scheduled' | 'available' | 'expired';
   phase_id: number;
   phase_code: string;
   phase_name: string;
@@ -225,6 +228,9 @@ function serializeMission(mission: MissionRow) {
     points: mission.points,
     active: mission.active,
     sortOrder: mission.sort_order,
+    opensAt: mission.opens_at,
+    closesAt: mission.closes_at,
+    effectiveStatus: mission.completed_at ? 'completed' : mission.effective_status,
     phase: {
       id: mission.phase_id,
       code: mission.phase_code,
@@ -255,6 +261,13 @@ async function missionsForPlayer(
   const result = await env.DB.prepare(
     `SELECT mission.id, mission.code, mission.title, mission.description,
             mission.mission_type, mission.points, mission.active, mission.sort_order,
+            mission.opens_at, mission.closes_at,
+            CASE
+              WHEN mission.active = false THEN 'inactive'
+              WHEN mission.opens_at IS NOT NULL AND CURRENT_TIMESTAMP < mission.opens_at THEN 'scheduled'
+              WHEN mission.closes_at IS NOT NULL AND CURRENT_TIMESTAMP >= mission.closes_at THEN 'expired'
+              ELSE 'available'
+            END AS effective_status,
             phase.id AS phase_id, phase.code AS phase_code, phase.name AS phase_name,
             phase.status AS phase_status, phase.sort_order AS phase_sort_order,
             completion.completed_at, completion.points_awarded
@@ -289,6 +302,8 @@ async function gameSummary(
               COUNT(mission.id)
                 FILTER (WHERE mission.active = true
                   AND phase.status = 'active'
+                  AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
+                  AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
                   AND completion.id IS NULL)::integer AS available_mission_count
        FROM fantasposi_missions mission
        INNER JOIN fantasposi_phases phase
@@ -523,7 +538,11 @@ async function bootstrapResponse(request: Request, env: FantasposiEnv): Promise<
   const currentPhase = phases.results.find((phase) => phase.status === 'active') ?? null;
   const summary = await gameSummary(env, resolved.wedding.id, serializedPlayer.id);
   const currentMissions = await missionsForPlayer(env, resolved.wedding.id, serializedPlayer.id);
-  const recommendedMissions = currentMissions.filter((mission) => !mission.completed_at).slice(0, 3);
+  // Keep scheduled missions in the bootstrap so the local clock can make them
+  // available without a network request when their opening time is reached.
+  const recommendedMissions = currentMissions.filter((mission) => (
+    !mission.completed_at && mission.effective_status !== 'expired'
+  ));
   const predictions = serializePredictions(await predictionRows(env, resolved.wedding.id, serializedPlayer.id));
   const openPredictions = predictions.filter((prediction) => prediction.canAnswer);
   const teamScores = await env.DB.prepare(
@@ -560,7 +579,7 @@ async function bootstrapResponse(request: Request, env: FantasposiEnv): Promise<
       status: phase.status,
     })),
     featureFlags: {
-      missionsLive: false,
+      missionsLive: true,
       predictionsLive: true,
       leaderboardLive: true,
     },
@@ -722,6 +741,8 @@ async function completeMissionResponse(
        AND mission.wedding_id = completion.wedding_id
        AND mission.active = true
        AND phase.status = 'active'
+       AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
+       AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
        AND mission.mission_type IN ('action', 'social')
      RETURNING completion.id, completion.player_id, completion.mission_id,
                completion.status, completion.completed_at, completion.points_awarded`,
@@ -741,6 +762,8 @@ async function completeMissionResponse(
          AND mission.wedding_id = ?
          AND mission.active = true
          AND phase.status = 'active'
+         AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
+         AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
          AND mission.mission_type IN ('action', 'social')
        ON CONFLICT (player_id, mission_id) DO NOTHING
        RETURNING id, player_id, mission_id, status, completed_at, points_awarded`,
@@ -760,12 +783,39 @@ async function completeMissionResponse(
     ).bind(resolved.wedding.id, player.id, missionId).first<CompletionRow>();
     if (existing) return completedMissionPayload(env, resolved.wedding.id, player.id, missionId, existing, true);
 
-    const missionExists = await env.DB.prepare(
-      'SELECT id FROM fantasposi_missions WHERE id = ? AND wedding_id = ? LIMIT 1',
-    ).bind(missionId, resolved.wedding.id).first<{ id: number }>();
-    return missionExists
-      ? json({ error: 'Mission is not currently available for manual completion' }, 409)
-      : json({ error: 'Mission not found' }, 404);
+    const missionState = await env.DB.prepare(
+      `SELECT mission.active, mission.mission_type, mission.opens_at, mission.closes_at,
+              phase.status AS phase_status,
+              CASE
+                WHEN mission.opens_at IS NOT NULL AND CURRENT_TIMESTAMP < mission.opens_at THEN 'scheduled'
+                WHEN mission.closes_at IS NOT NULL AND CURRENT_TIMESTAMP >= mission.closes_at THEN 'expired'
+                ELSE 'available'
+              END AS effective_status
+       FROM fantasposi_missions mission
+       INNER JOIN fantasposi_phases phase
+         ON phase.id = mission.phase_id AND phase.wedding_id = mission.wedding_id
+       WHERE mission.id = ? AND mission.wedding_id = ? LIMIT 1`,
+    ).bind(missionId, resolved.wedding.id).first<{
+      active: boolean;
+      mission_type: string;
+      opens_at: string | null;
+      closes_at: string | null;
+      phase_status: string;
+      effective_status: 'scheduled' | 'available' | 'expired';
+    }>();
+    if (!missionState) return json({ error: 'Mission not found' }, 404);
+    if (missionState.effective_status === 'scheduled') {
+      return json({ error: 'La missione non è ancora disponibile.', code: 'mission_scheduled' }, 409);
+    }
+    if (missionState.effective_status === 'expired') {
+      return json({ error: 'Il tempo per questa missione è scaduto.', code: 'mission_expired' }, 409);
+    }
+    return json({
+      error: missionState.active && missionState.phase_status === 'active'
+        && (missionState.mission_type === 'action' || missionState.mission_type === 'social')
+        ? 'Mission completion could not be recorded'
+        : 'Mission is not currently available for manual completion',
+    }, 409);
   }
 
   return completedMissionPayload(env, resolved.wedding.id, player.id, missionId, completion, false);
@@ -782,6 +832,13 @@ async function completedMissionPayload(
   const mission = await env.DB.prepare(
     `SELECT mission.id, mission.code, mission.title, mission.description,
             mission.mission_type, mission.points, mission.active, mission.sort_order,
+            mission.opens_at, mission.closes_at,
+            CASE
+              WHEN mission.active = false THEN 'inactive'
+              WHEN mission.opens_at IS NOT NULL AND CURRENT_TIMESTAMP < mission.opens_at THEN 'scheduled'
+              WHEN mission.closes_at IS NOT NULL AND CURRENT_TIMESTAMP >= mission.closes_at THEN 'expired'
+              ELSE 'available'
+            END AS effective_status,
             phase.id AS phase_id, phase.code AS phase_code, phase.name AS phase_name,
             phase.status AS phase_status, phase.sort_order AS phase_sort_order,
             completion.completed_at, completion.points_awarded

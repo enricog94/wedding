@@ -3337,6 +3337,15 @@ button.gallery-item:hover .gallery-item__image {
   line-height: 1.65;
 }
 
+.fantasposi-mission .fantasposi-mission__timing {
+  margin: 0.85rem 0;
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .fantasposi-mission > button {
   width: 100%;
   min-height: 3rem;
@@ -3358,6 +3367,14 @@ button.gallery-item:hover .gallery-item__image {
   color: var(--color-primary);
   background: transparent;
   cursor: default;
+}
+
+.fantasposi-mission.is-scheduled > button,
+.fantasposi-mission.is-expired > button {
+  color: var(--color-muted);
+  border-color: var(--color-border);
+  background: transparent;
+  cursor: not-allowed;
 }
 
 .fantasposi-mission > small {

@@ -28,6 +28,9 @@ type AdminMissionRow = {
   points: number;
   active: boolean;
   sort_order: number;
+  opens_at: string | null;
+  closes_at: string | null;
+  effective_status: 'inactive' | 'scheduled' | 'available' | 'expired';
   phase_id: number;
   phase_name: string;
   phase_status: PhaseStatus;
@@ -88,6 +91,9 @@ function serializeMission(mission: AdminMissionRow) {
     points: mission.points,
     active: mission.active,
     sortOrder: mission.sort_order,
+    opensAt: mission.opens_at,
+    closesAt: mission.closes_at,
+    effectiveStatus: mission.effective_status,
     phaseId: mission.phase_id,
     phaseName: mission.phase_name,
     phaseStatus: mission.phase_status,
@@ -114,6 +120,13 @@ async function listMissions(env: AdminFantasyEnv, weddingId: number): Promise<Ad
   const result = await env.DB.prepare(
     `SELECT mission.id, mission.code, mission.title, mission.description,
             mission.mission_type, mission.points, mission.active, mission.sort_order,
+            mission.opens_at, mission.closes_at,
+            CASE
+              WHEN mission.active = false OR phase.status <> 'active' THEN 'inactive'
+              WHEN mission.opens_at IS NOT NULL AND CURRENT_TIMESTAMP < mission.opens_at THEN 'scheduled'
+              WHEN mission.closes_at IS NOT NULL AND CURRENT_TIMESTAMP >= mission.closes_at THEN 'expired'
+              ELSE 'available'
+            END AS effective_status,
             phase.id AS phase_id, phase.name AS phase_name, phase.status AS phase_status,
             COUNT(completion.id)::integer AS completion_count
      FROM fantasposi_missions mission
@@ -139,6 +152,8 @@ function parseMissionInput(input: unknown): {
   points: number;
   active: boolean;
   sortOrder: number;
+  opensAt: string | null;
+  closesAt: string | null;
 } | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const body = input as Record<string, unknown>;
@@ -152,6 +167,8 @@ function parseMissionInput(input: unknown): {
   const points = Number(body.points);
   const active = body.active;
   const sortOrder = Number(body.sortOrder);
+  const opensAt = parseTimestamp(body.opensAt);
+  const closesAt = parseTimestamp(body.closesAt);
   if (
     !/^[a-z0-9][a-z0-9-]{1,79}$/.test(code)
     || !Number.isSafeInteger(phaseId) || phaseId <= 0
@@ -161,8 +178,13 @@ function parseMissionInput(input: unknown): {
     || !Number.isSafeInteger(points) || points < 0 || points > 10_000
     || typeof active !== 'boolean'
     || !Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000
+    || opensAt === undefined || closesAt === undefined
+    || (opensAt && closesAt && opensAt >= closesAt)
   ) return null;
-  return { code, phaseId, title, description, missionType, points, active, sortOrder };
+  return {
+    code, phaseId, title, description, missionType, points, active, sortOrder,
+    opensAt, closesAt,
+  };
 }
 
 function parseTimestamp(value: unknown): string | null | undefined {
@@ -394,15 +416,16 @@ export async function handleAdminFantasposiRequest(
       const created = await env.DB.prepare(
         `INSERT INTO fantasposi_missions (
            wedding_id, phase_id, code, title, description,
-           mission_type, points, active, sort_order
+           mission_type, points, active, sort_order, opens_at, closes_at
          )
-         SELECT ?, phase.id, ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, phase.id, ?, ?, ?, ?, ?, ?, ?, ?, ?
          FROM fantasposi_phases phase
          WHERE phase.id = ? AND phase.wedding_id = ?
          RETURNING id`,
       ).bind(
         wedding.id, input.code, input.title, input.description, input.missionType,
-        input.points, input.active, input.sortOrder, input.phaseId, wedding.id,
+        input.points, input.active, input.sortOrder, input.opensAt, input.closesAt,
+        input.phaseId, wedding.id,
       ).first<{ id: number }>();
       if (!created) return json({ error: 'Phase not found' }, 400);
       const mission = (await listMissions(env, wedding.id)).find((entry) => entry.id === created.id);
@@ -419,7 +442,8 @@ export async function handleAdminFantasposiRequest(
         `UPDATE fantasposi_missions mission
          SET phase_id = phase.id,
              code = ?, title = ?, description = ?, mission_type = ?, points = ?,
-             active = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+             active = ?, sort_order = ?, opens_at = ?, closes_at = ?,
+             updated_at = CURRENT_TIMESTAMP
          FROM fantasposi_phases phase
          WHERE mission.id = ?
            AND mission.wedding_id = ?
@@ -428,7 +452,8 @@ export async function handleAdminFantasposiRequest(
          RETURNING mission.id`,
       ).bind(
         input.code, input.title, input.description, input.missionType, input.points,
-        input.active, input.sortOrder, missionId, wedding.id, input.phaseId,
+        input.active, input.sortOrder, input.opensAt, input.closesAt,
+        missionId, wedding.id, input.phaseId,
       ).first<{ id: number }>();
       if (!updated) return json({ error: 'Mission or phase not found' }, 404);
       const mission = (await listMissions(env, wedding.id)).find((entry) => entry.id === updated.id);

@@ -64,6 +64,10 @@ type FantasyMission = {
   description: string | null;
   missionType: string;
   points: number;
+  active: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  effectiveStatus: 'inactive' | 'scheduled' | 'available' | 'expired' | 'completed';
   phase: { id: number; code: string; name: string; status: string };
   completed: boolean;
   completedAt: string | null;
@@ -129,7 +133,7 @@ function formatPredictionTime(value: string | null): string | null {
   }).format(new Date(value));
 }
 
-function predictionCountdown(target: string | null, now: number): string | null {
+function fantasposiCountdown(target: string | null, now: number): string | null {
   if (!target) return null;
   const seconds = Math.max(0, Math.ceil((Date.parse(target) - now) / 1_000));
   const hours = Math.floor(seconds / 3_600);
@@ -138,6 +142,17 @@ function predictionCountdown(target: string | null, now: number): string | null 
   return hours > 0
     ? `${hours}h ${String(minutes).padStart(2, '0')}m`
     : `${minutes}m ${String(remainingSeconds).padStart(2, '0')}s`;
+}
+
+function effectiveMissionStatus(
+  mission: FantasyMission,
+  now: number,
+): FantasyMission['effectiveStatus'] {
+  if (mission.completed) return 'completed';
+  if (!mission.active || mission.phase.status !== 'active') return 'inactive';
+  if (mission.opensAt && now < Date.parse(mission.opensAt)) return 'scheduled';
+  if (mission.closesAt && now >= Date.parse(mission.closesAt)) return 'expired';
+  return 'available';
 }
 
 type MissionsResponse = {
@@ -362,6 +377,7 @@ function FantasyMissions({
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const now = useFantasposiClock(true);
 
   useEffect(() => {
     let mounted = true;
@@ -377,7 +393,7 @@ function FantasyMissions({
   }, [refreshKey]);
 
   const complete = async (mission: FantasyMission) => {
-    if (mission.completed || busyId !== null) return;
+    if (effectiveMissionStatus(mission, now) !== 'available' || busyId !== null) return;
     setBusyId(mission.id); setError('');
     try {
       const response = await fantasyFetch(`/api/fantasposi/missions/${mission.id}/complete`, { method: 'POST' });
@@ -418,17 +434,29 @@ function FantasyMissions({
       {error && <p className="fantasposi-error" role="alert">{error}</p>}
       {!data?.phases.length && <div className="fantasposi-missions__empty"><span aria-hidden="true">✦</span><p>Le missioni saranno disponibili quando inizierà la prossima fase.</p></div>}
       <div className="fantasposi-mission-list">
-        {data?.phases.flatMap((group) => group.missions).map((mission) => (
-          <article className={`fantasposi-mission ${mission.completed ? 'is-completed' : ''}`} key={mission.id}>
+        {data?.phases.flatMap((group) => group.missions).map((mission) => {
+          const effectiveStatus = effectiveMissionStatus(mission, now);
+          const timing = effectiveStatus === 'scheduled'
+            ? `Si sblocca tra ${fantasposiCountdown(mission.opensAt, now) ?? ''}`
+            : effectiveStatus === 'available' && mission.closesAt
+              ? `Chiude tra ${fantasposiCountdown(mission.closesAt, now) ?? ''}`
+              : effectiveStatus === 'expired' ? 'Tempo scaduto' : null;
+          return (
+          <article className={`fantasposi-mission is-${effectiveStatus}`} key={mission.id}>
             <div><p>{mission.missionType === 'social' ? 'Missione social' : 'Missione action'}</p><strong>+{mission.points} punti</strong></div>
             <h2>{mission.title}</h2>
             {mission.description && <p>{mission.description}</p>}
-            <button type="button" disabled={mission.completed || busyId !== null} onClick={() => void complete(mission)}>
-              {mission.completed ? '✓ Completata' : busyId === mission.id ? 'Completamento…' : 'Missione completata'}
+            {timing && <p className="fantasposi-mission__timing">{timing}</p>}
+            <button type="button" disabled={effectiveStatus !== 'available' || busyId !== null} onClick={() => void complete(mission)}>
+              {effectiveStatus === 'completed' ? '✓ Completata'
+                : effectiveStatus === 'scheduled' ? 'Non ancora disponibile'
+                  : effectiveStatus === 'expired' ? 'Missione scaduta'
+                    : busyId === mission.id ? 'Completamento…' : 'Missione completata'}
             </button>
             {mission.completed && <small>+{mission.pointsAwarded ?? mission.points} punti conquistati</small>}
           </article>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -575,9 +603,9 @@ function FantasyPredictions({ refreshKey }: { refreshKey: number }) {
       const canAnswer = effectiveStatus === 'open' && prediction.phaseActive;
       const correct = effectiveStatus === 'resolved' && selected === prediction.correctOptionId;
       const timing = effectiveStatus === 'scheduled'
-        ? `Apre tra ${predictionCountdown(prediction.opensAt, now) ?? ''}`
+        ? `Apre tra ${fantasposiCountdown(prediction.opensAt, now) ?? ''}`
         : effectiveStatus === 'open' && prediction.closesAt
-          ? `Chiude tra ${predictionCountdown(prediction.closesAt, now) ?? ''}` : null;
+          ? `Chiude tra ${fantasposiCountdown(prediction.closesAt, now) ?? ''}` : null;
       return <article key={prediction.id} className={`fantasposi-prediction is-${effectiveStatus}`}>
         <div><span>{effectiveStatus === 'scheduled' ? 'Programmato' : effectiveStatus === 'open' ? 'Aperto' : effectiveStatus === 'closed' ? 'Chiuso' : 'Risultato'}</span><strong>+{prediction.points} punti</strong></div>
         <h2>{prediction.question}</h2>
@@ -611,6 +639,7 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   const [missionsRefreshKey, setMissionsRefreshKey] = useState(0);
   const [predictionsRefreshKey, setPredictionsRefreshKey] = useState(0);
   const [leaderboardRefreshKey, setLeaderboardRefreshKey] = useState(0);
+  const homeNow = useFantasposiClock(path === '/fantasposi');
   useEffect(() => {
     const update = () => setPath(window.location.pathname.replace(/\/$/, '') || '/fantasposi');
     window.addEventListener('popstate', update);
@@ -654,6 +683,9 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   }, [path, refreshBootstrap]);
   const teamName = game.wedding.teams[game.player.team];
   const displayName = game.player.displayName || 'Giocatore';
+  const availableHomeMissions = game.recommendedMissions
+    .filter((mission) => effectiveMissionStatus(mission, homeNow) === 'available');
+  const homeMissions = availableHomeMissions.slice(0, 3);
 
   let content;
   if (path === '/fantasposi/missioni') {
@@ -671,7 +703,7 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   } else if (path === '/fantasposi/profilo') {
     content = <section className="fantasposi-profile"><p className="fantasposi-kicker">Il tuo profilo</p><div className="fantasposi-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</div><h1>{displayName}</h1><p>{teamName}</p><button className="fantasposi-secondary" type="button" onClick={() => void onLogout()}>Esci</button></section>;
   } else {
-    content = <section className="fantasposi-home"><p className="fantasposi-kicker">FantaSposi · {game.wedding.brideName} &amp; {game.wedding.groomName}</p><h1>Ciao, {displayName}!</h1><div className="fantasposi-home__meta"><span>{teamName}</span><span>Fase: {game.currentPhase?.name ?? 'In preparazione'}</span></div><div className="fantasposi-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong></div><div className="fantasposi-home__counts"><div><strong>{game.availableMissionCount}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Completate</span></div></div><section className="fantasposi-now"><div><p className="fantasposi-kicker">Missioni da fare adesso</p><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></div>{game.recommendedMissions.length > 0 ? game.recommendedMissions.map((mission) => <button type="button" key={mission.id} onClick={() => navigate('/fantasposi/missioni')}><span>+{mission.points}</span><strong>{mission.title}</strong></button>) : <p>Nessuna missione disponibile in questo momento.</p>}</section><section className="fantasposi-home__predictions"><div><p className="fantasposi-kicker">Pronostici aperti</p><strong>{game.openPredictionCount}</strong></div>{game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points}</span>{prediction.question}</button>)}<button type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button></section></section>;
+    content = <section className="fantasposi-home"><p className="fantasposi-kicker">FantaSposi · {game.wedding.brideName} &amp; {game.wedding.groomName}</p><h1>Ciao, {displayName}!</h1><div className="fantasposi-home__meta"><span>{teamName}</span><span>Fase: {game.currentPhase?.name ?? 'In preparazione'}</span></div><div className="fantasposi-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong></div><div className="fantasposi-home__counts"><div><strong>{availableHomeMissions.length}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Completate</span></div></div><section className="fantasposi-now"><div><p className="fantasposi-kicker">Missioni da fare adesso</p><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></div>{homeMissions.length > 0 ? homeMissions.map((mission) => <button type="button" key={mission.id} onClick={() => navigate('/fantasposi/missioni')}><span>+{mission.points}</span><strong>{mission.title}</strong></button>) : <p>Nessuna missione disponibile in questo momento.</p>}</section><section className="fantasposi-home__predictions"><div><p className="fantasposi-kicker">Pronostici aperti</p><strong>{game.openPredictionCount}</strong></div>{game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points}</span>{prediction.question}</button>)}<button type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button></section></section>;
   }
 
   return (

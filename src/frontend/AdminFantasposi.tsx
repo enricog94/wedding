@@ -25,6 +25,9 @@ type Mission = {
   phaseId: number;
   phaseName: string;
   phaseStatus: PhaseStatus;
+  opensAt: string | null;
+  closesAt: string | null;
+  effectiveStatus: 'inactive' | 'scheduled' | 'available' | 'expired';
   completionCount: number;
 };
 
@@ -46,6 +49,8 @@ type MissionDraft = {
   active: boolean;
   sortOrder: number;
   phaseId: number;
+  opensAt: string;
+  closesAt: string;
 };
 
 type PredictionStatus = 'draft' | 'open' | 'closed' | 'resolved';
@@ -75,6 +80,8 @@ const emptyDraft: MissionDraft = {
   active: true,
   sortOrder: 0,
   phaseId: 0,
+  opensAt: '',
+  closesAt: '',
 };
 
 const emptyPredictionDraft: PredictionDraft = {
@@ -88,6 +95,13 @@ const emptyPredictionDraft: PredictionDraft = {
 
 const predictionStatusLabels: Record<Prediction['effectiveStatus'], string> = {
   draft: 'BOZZA', scheduled: 'PROGRAMMATO', open: 'APERTO ORA', closed: 'CHIUSO', resolved: 'RISOLTO',
+};
+
+const missionStatusLabels: Record<Mission['effectiveStatus'], string> = {
+  inactive: 'NON ATTIVA',
+  scheduled: 'PROGRAMMATA',
+  available: 'DISPONIBILE ORA',
+  expired: 'SCADUTA',
 };
 
 function adminPredictionTime(value: string | null): string {
@@ -183,7 +197,11 @@ export function AdminFantasposi() {
       await api(url, {
         method: draft.id ? 'PATCH' : 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({
+          ...draft,
+          opensAt: draft.opensAt ? new Date(draft.opensAt).toISOString() : null,
+          closesAt: draft.closesAt ? new Date(draft.closesAt).toISOString() : null,
+        }),
       });
       setFeedback(draft.id ? 'Missione aggiornata.' : 'Missione creata.');
       setDraft({ ...emptyDraft, phaseId: phases[0]?.id ?? 0 });
@@ -210,6 +228,8 @@ export function AdminFantasposi() {
       active: mission.active,
       sortOrder: mission.sortOrder,
       phaseId: mission.phaseId,
+      opensAt: mission.opensAt?.slice(0, 16) ?? '',
+      closesAt: mission.closesAt?.slice(0, 16) ?? '',
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -320,7 +340,41 @@ export function AdminFantasposi() {
 
       {!loading && section === 'phases' && <div className="admin-fantasposi__phases">{phases.map((phase) => <article key={phase.id}><div><span>{phase.code}</span><strong>{phase.missionCount} missioni</strong></div><label>Nome<input value={phase.name} onChange={(event) => setPhases((current) => current.map((item) => item.id === phase.id ? { ...item, name: event.target.value } : item))} /></label><label>Ordine<input type="number" min="0" value={phase.sortOrder} onChange={(event) => setPhases((current) => current.map((item) => item.id === phase.id ? { ...item, sortOrder: Number(event.target.value) } : item))} /></label><label>Stato<select value={phase.status} onChange={(event) => setPhases((current) => current.map((item) => item.id === phase.id ? { ...item, status: event.target.value as PhaseStatus } : item))}><option value="locked">Locked</option><option value="active">Active</option><option value="completed">Completed</option></select></label><button type="button" disabled={busy} onClick={() => void updatePhase(phase)}>Salva fase</button></article>)}</div>}
 
-      {!loading && section === 'missions' && <><form className="admin-fantasposi__mission-form" onSubmit={saveMission}><h3>{draft.id ? 'Modifica missione' : 'Nuova missione'}</h3><label>Codice<input required pattern="[a-z0-9][a-z0-9-]{1,79}" value={draft.code} onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }))} /></label><label>Titolo<input required minLength={2} maxLength={140} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label><label>Descrizione<textarea maxLength={1000} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></label><div><label>Fase<select required value={draft.phaseId} onChange={(event) => setDraft((current) => ({ ...current, phaseId: Number(event.target.value) }))}>{phases.map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}</select></label><label>Tipo<select value={draft.missionType} onChange={(event) => setDraft((current) => ({ ...current, missionType: event.target.value as 'action' | 'social' }))}><option value="action">Action</option><option value="social">Social</option></select></label><label>Punti<input type="number" min="0" max="10000" value={draft.points} onChange={(event) => setDraft((current) => ({ ...current, points: Number(event.target.value) }))} /></label><label>Ordine<input type="number" min="0" value={draft.sortOrder} onChange={(event) => setDraft((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></label></div><label className="admin-fantasposi__check"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft((current) => ({ ...current, active: event.target.checked }))} /> Missione attiva</label><div><button type="submit" disabled={busy || phases.length === 0}>{draft.id ? 'Salva modifiche' : 'Crea missione'}</button>{draft.id && <button type="button" disabled={busy} onClick={() => setDraft({ ...emptyDraft, phaseId: phases[0]?.id ?? 0 })}>Annulla</button>}</div></form><div className="admin-fantasposi__missions">{missions.map((mission) => { const supported = mission.missionType === 'action' || mission.missionType === 'social'; return <article key={mission.id}><div><span>{mission.phaseName} · {mission.missionType}{supported ? '' : ' · non supportata'}</span><strong>{mission.active ? 'Attiva' : 'Disattivata'}</strong></div><h3>{mission.title}</h3>{mission.description && <p>{mission.description}</p>}<small>{mission.code} · {mission.points} punti · {mission.completionCount} completamenti · ordine {mission.sortOrder}</small><div><button type="button" disabled={busy || !supported} title={!supported ? 'Tipo non ancora supportato in V1' : undefined} onClick={() => editMission(mission)}>Modifica</button><button className="admin-danger" type="button" disabled={busy} onClick={() => void deleteMission(mission)}>Elimina</button></div></article>; })}</div></>}
+      {!loading && section === 'missions' && <>
+        <form className="admin-fantasposi__mission-form" onSubmit={saveMission}>
+          <h3>{draft.id ? 'Modifica missione' : 'Nuova missione'}</h3>
+          <label>Codice<input required pattern="[a-z0-9][a-z0-9-]{1,79}" value={draft.code} onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }))} /></label>
+          <label>Titolo<input required minLength={2} maxLength={140} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label>
+          <label>Descrizione<textarea maxLength={1000} value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></label>
+          <div>
+            <label>Fase<select required value={draft.phaseId} onChange={(event) => setDraft((current) => ({ ...current, phaseId: Number(event.target.value) }))}>{phases.map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}</select></label>
+            <label>Tipo<select value={draft.missionType} onChange={(event) => setDraft((current) => ({ ...current, missionType: event.target.value as 'action' | 'social' }))}><option value="action">Action</option><option value="social">Social</option></select></label>
+            <label>Punti<input type="number" min="0" max="10000" value={draft.points} onChange={(event) => setDraft((current) => ({ ...current, points: Number(event.target.value) }))} /></label>
+            <label>Ordine<input type="number" min="0" value={draft.sortOrder} onChange={(event) => setDraft((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></label>
+          </div>
+          <div>
+            <label>Apre alle<input type="datetime-local" value={draft.opensAt} onChange={(event) => setDraft((current) => ({ ...current, opensAt: event.target.value }))} /></label>
+            <label>Chiude alle<input type="datetime-local" value={draft.closesAt} onChange={(event) => setDraft((current) => ({ ...current, closesAt: event.target.value }))} /></label>
+          </div>
+          <label className="admin-fantasposi__check"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft((current) => ({ ...current, active: event.target.checked }))} /> Missione attiva</label>
+          <div><button type="submit" disabled={busy || phases.length === 0}>{draft.id ? 'Salva modifiche' : 'Crea missione'}</button>{draft.id && <button type="button" disabled={busy} onClick={() => setDraft({ ...emptyDraft, phaseId: phases[0]?.id ?? 0 })}>Annulla</button>}</div>
+        </form>
+        <div className="admin-fantasposi__missions">{missions.map((mission) => {
+          const supported = mission.missionType === 'action' || mission.missionType === 'social';
+          return <article key={mission.id}>
+            <div><span>{mission.phaseName} · {mission.missionType}{supported ? '' : ' · non supportata'}</span><strong>{missionStatusLabels[mission.effectiveStatus]}</strong></div>
+            <h3>{mission.title}</h3>
+            {mission.description && <p>{mission.description}</p>}
+            <dl className="admin-fantasposi__prediction-meta">
+              <div><dt>Apertura</dt><dd>{adminPredictionTime(mission.opensAt)}</dd></div>
+              <div><dt>Chiusura</dt><dd>{adminPredictionTime(mission.closesAt)}</dd></div>
+              <div><dt>Completamenti</dt><dd>{mission.completionCount}</dd></div>
+            </dl>
+            <small>{mission.code} · {mission.points} punti · ordine {mission.sortOrder}</small>
+            <div><button type="button" disabled={busy || !supported} title={!supported ? 'Tipo non ancora supportato in V1' : undefined} onClick={() => editMission(mission)}>Modifica</button><button className="admin-danger" type="button" disabled={busy} onClick={() => void deleteMission(mission)}>Elimina</button></div>
+          </article>;
+        })}</div>
+      </>}
 
       {!loading && section === 'predictions' && <><form className="admin-fantasposi__mission-form admin-fantasposi__prediction-form" onSubmit={savePrediction}><h3>{predictionDraft.id ? 'Modifica pronostico' : 'Nuovo pronostico'}</h3><label>Codice<input required pattern="[a-z0-9][a-z0-9-]{1,79}" value={predictionDraft.code} onChange={(event) => setPredictionDraft((current) => ({ ...current, code: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-') }))} /></label><label>Domanda<input required minLength={3} maxLength={240} value={predictionDraft.question} onChange={(event) => setPredictionDraft((current) => ({ ...current, question: event.target.value }))} /></label><label>Descrizione<textarea maxLength={1500} value={predictionDraft.description} onChange={(event) => setPredictionDraft((current) => ({ ...current, description: event.target.value }))} /></label><div><label>Fase<select value={predictionDraft.phaseId ?? ''} onChange={(event) => setPredictionDraft((current) => ({ ...current, phaseId: event.target.value ? Number(event.target.value) : null }))}><option value="">Globale</option>{phases.map((phase) => <option key={phase.id} value={phase.id}>{phase.name}</option>)}</select></label><label>Punti<input type="number" min="0" max="10000" value={predictionDraft.points} onChange={(event) => setPredictionDraft((current) => ({ ...current, points: Number(event.target.value) }))} /></label><label>Ordine<input type="number" min="0" value={predictionDraft.sortOrder} onChange={(event) => setPredictionDraft((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></label></div><div><label>Apre alle<input type="datetime-local" value={predictionDraft.opensAt} onChange={(event) => setPredictionDraft((current) => ({ ...current, opensAt: event.target.value }))} /></label><label>Chiude alle<input type="datetime-local" value={predictionDraft.closesAt} onChange={(event) => setPredictionDraft((current) => ({ ...current, closesAt: event.target.value }))} /></label></div><fieldset><legend>Opzioni</legend>{predictionDraft.options.map((option, index) => <div key={index}><input aria-label={`Codice opzione ${index + 1}`} required maxLength={20} value={option.code} onChange={(event) => setPredictionDraft((current) => ({ ...current, options: current.options.map((entry, optionIndex) => optionIndex === index ? { ...entry, code: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') } : entry) }))} /><input aria-label={`Testo opzione ${index + 1}`} required maxLength={160} value={option.label} onChange={(event) => setPredictionDraft((current) => ({ ...current, options: current.options.map((entry, optionIndex) => optionIndex === index ? { ...entry, label: event.target.value } : entry) }))} />{predictionDraft.options.length > 2 && <button type="button" onClick={() => setPredictionDraft((current) => ({ ...current, options: current.options.filter((_, optionIndex) => optionIndex !== index).map((entry, optionIndex) => ({ ...entry, sortOrder: optionIndex })) }))}>Rimuovi</button>}</div>)}</fieldset><button type="button" disabled={predictionDraft.options.length >= 12} onClick={() => setPredictionDraft((current) => ({ ...current, options: [...current.options, { code: String.fromCharCode(97 + current.options.length), label: '', sortOrder: current.options.length }] }))}>Aggiungi opzione</button><div><button type="submit" disabled={busy}>{predictionDraft.id ? 'Salva modifiche' : 'Crea bozza'}</button>{predictionDraft.id && <button type="button" onClick={() => setPredictionDraft(emptyPredictionDraft)}>Annulla</button>}</div></form><div className="admin-fantasposi__missions admin-fantasposi__predictions">{predictions.map((prediction) => { const correctOption = prediction.options.find((option) => option.id === prediction.correctOptionId); return <article key={prediction.id}><div><span>{prediction.phaseName ?? 'Globale'} · <b>{predictionStatusLabels[prediction.effectiveStatus]}</b></span><strong>{prediction.points} punti</strong></div><h3>{prediction.question}</h3>{prediction.description && <p>{prediction.description}</p>}<dl className="admin-fantasposi__prediction-meta"><div><dt>Apertura</dt><dd>{adminPredictionTime(prediction.opensAt)}</dd></div><div><dt>Chiusura</dt><dd>{adminPredictionTime(prediction.closesAt)}</dd></div><div><dt>Risposte</dt><dd>{prediction.responseCount}</dd></div>{prediction.effectiveStatus === 'resolved' && <div><dt>Risposta corretta</dt><dd>{correctOption?.label ?? '—'}</dd></div>}{prediction.effectiveStatus === 'resolved' && <div><dt>Punti assegnati</dt><dd>{prediction.pointsAwardedTotal}</dd></div>}</dl><small>{adminPredictionTiming(prediction)} · {prediction.options.map((option) => `${option.code.toUpperCase()}. ${option.label}`).join(' · ')}</small><div>{prediction.status !== 'resolved' && prediction.responseCount === 0 && <button type="button" disabled={busy} onClick={() => editPrediction(prediction)}>Modifica</button>}{prediction.status === 'draft' && <button type="button" disabled={busy} onClick={() => void predictionAction(prediction, 'open')}>Pubblica</button>}{prediction.effectiveStatus === 'open' && <button type="button" disabled={busy} onClick={() => void predictionAction(prediction, 'close')}>Chiudi ora</button>}{prediction.effectiveStatus === 'closed' && <button type="button" disabled={busy} onClick={() => void predictionAction(prediction, 'resolve')}>Risolvi</button>}<button className="admin-danger" type="button" disabled={busy || prediction.responseCount > 0} onClick={() => void deletePrediction(prediction)}>Elimina</button></div></article>; })}</div></>}
     </section>
