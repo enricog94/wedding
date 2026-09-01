@@ -143,7 +143,7 @@ async function listMissions(env: AdminFantasyEnv, weddingId: number): Promise<Ad
   return result.results;
 }
 
-function parseMissionInput(input: unknown): {
+type MissionInput = {
   code: string;
   phaseId: number;
   title: string;
@@ -154,8 +154,16 @@ function parseMissionInput(input: unknown): {
   sortOrder: number;
   opensAt: string | null;
   closesAt: string | null;
-} | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+};
+
+type MissionInputResult =
+  | { value: MissionInput; invalidField: null }
+  | { value: null; invalidField: string };
+
+function parseMissionInput(input: unknown): MissionInputResult {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { value: null, invalidField: 'payload' };
+  }
   const body = input as Record<string, unknown>;
   const code = typeof body.code === 'string' ? body.code.trim().toLowerCase() : '';
   const phaseId = Number(body.phaseId);
@@ -169,26 +177,34 @@ function parseMissionInput(input: unknown): {
   const sortOrder = Number(body.sortOrder);
   const opensAt = parseTimestamp(body.opensAt);
   const closesAt = parseTimestamp(body.closesAt);
-  if (
-    !/^[a-z0-9][a-z0-9-]{1,79}$/.test(code)
-    || !Number.isSafeInteger(phaseId) || phaseId <= 0
-    || title.length < 2 || title.length > 140
-    || (description?.length ?? 0) > 1000
-    || (missionType !== 'action' && missionType !== 'social')
-    || !Number.isSafeInteger(points) || points < 0 || points > 10_000
-    || typeof active !== 'boolean'
-    || !Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000
-    || opensAt === undefined || closesAt === undefined
-    || (opensAt && closesAt && opensAt >= closesAt)
-  ) return null;
+  let invalidField: string | null = null;
+  if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(code)) invalidField = 'code';
+  else if (!Number.isSafeInteger(phaseId) || phaseId <= 0) invalidField = 'phaseId';
+  else if (title.length < 2 || title.length > 140) invalidField = 'title';
+  else if ((description?.length ?? 0) > 1000) invalidField = 'description';
+  else if (missionType !== 'action' && missionType !== 'social') invalidField = 'missionType';
+  else if (!Number.isSafeInteger(points) || points < 0 || points > 10_000) invalidField = 'points';
+  else if (typeof active !== 'boolean') invalidField = 'active';
+  else if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000) invalidField = 'sortOrder';
+  else if (opensAt === undefined) invalidField = 'opensAt';
+  else if (closesAt === undefined) invalidField = 'closesAt';
+  else if (opensAt && closesAt && opensAt >= closesAt) invalidField = 'timeRange';
+
+  if (invalidField) return { value: null, invalidField };
   return {
-    code, phaseId, title, description, missionType, points, active, sortOrder,
-    opensAt, closesAt,
+    value: {
+      code, phaseId, title, description,
+      missionType: missionType as 'action' | 'social', points,
+      active: active as boolean, sortOrder,
+      opensAt: opensAt as string | null,
+      closesAt: closesAt as string | null,
+    },
+    invalidField: null,
   };
 }
 
 function parseTimestamp(value: unknown): string | null | undefined {
-  if (value === null || value === '') return null;
+  if (value === null || value === '' || value === undefined) return null;
   if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return undefined;
   return new Date(value).toISOString();
 }
@@ -411,8 +427,12 @@ export async function handleAdminFantasposiRequest(
       return json({ missions: (await listMissions(env, wedding.id)).map(serializeMission) });
     }
     if (request.method === 'POST' && url.pathname === '/api/admin/fantasposi/missions') {
-      const input = parseMissionInput(await request.json());
-      if (!input) return json({ error: 'Invalid mission data' }, 400);
+      const parsed = parseMissionInput(await request.json());
+      if (!parsed.value) {
+        console.warn('Invalid admin mission input', { invalidField: parsed.invalidField });
+        return json({ error: `Invalid mission data: ${parsed.invalidField}` }, 400);
+      }
+      const input = parsed.value;
       const created = await env.DB.prepare(
         `INSERT INTO fantasposi_missions (
            wedding_id, phase_id, code, title, description,
@@ -436,8 +456,12 @@ export async function handleAdminFantasposiRequest(
     if ((request.method === 'PATCH' || request.method === 'PUT') && missionMatch) {
       const missionId = Number(missionMatch[1]);
       if (!Number.isSafeInteger(missionId) || missionId <= 0) return json({ error: 'Invalid mission ID' }, 400);
-      const input = parseMissionInput(await request.json());
-      if (!input) return json({ error: 'Invalid mission data' }, 400);
+      const parsed = parseMissionInput(await request.json());
+      if (!parsed.value) {
+        console.warn('Invalid admin mission input', { invalidField: parsed.invalidField });
+        return json({ error: `Invalid mission data: ${parsed.invalidField}` }, 400);
+      }
+      const input = parsed.value;
       const updated = await env.DB.prepare(
         `UPDATE fantasposi_missions mission
          SET phase_id = phase.id,
