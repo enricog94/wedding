@@ -10,8 +10,10 @@ import { ThemeDecoration } from '../components/ThemeDecoration';
 import { DEFAULT_WEDDING_CONTENT, getWeddingContent } from '../lib/config';
 import { applyWeddingTheme, getWeddingTheme } from '../lib/themes';
 import { AdminAuth } from './AdminAuth';
+import { AuthCallback } from './AuthCallback';
 import { GalleryPage } from './GalleryPage';
 import { PhotoPage } from './PhotoPage';
+import { FantasposiApp } from './FantasposiApp';
 
 function FadeIn({ children, delay = 0, className = '' }: { children: ReactNode; delay?: number; className?: string }) {
   const [isVisible, setIsVisible] = useState(false);
@@ -48,15 +50,28 @@ function weddingDateLong(date: string) {
 
 export function App() {
   const [content, setContent] = useState(DEFAULT_WEDDING_CONTENT);
+  const [isContentResolved, setIsContentResolved] = useState(false);
   const isPhotoPage = window.location.pathname === '/foto' || window.location.pathname === '/foto/';
   const isGalleryPage = window.location.pathname === '/gallery' || window.location.pathname === '/gallery/';
   const isAdminPage = window.location.pathname === '/admin' || window.location.pathname === '/admin/';
+  const isAuthCallbackPage = window.location.pathname === '/auth/callback'
+    || window.location.pathname === '/auth/callback/';
+  const isFantasposiPage = window.location.pathname === '/fantasposi'
+    || window.location.pathname.startsWith('/fantasposi/');
 
   useEffect(() => {
     const controller = new AbortController();
-    getWeddingContent(controller.signal).then(setContent).catch(() => {
-      // Minimal identity defaults prevent a broken page during temporary API failures.
-    });
+    getWeddingContent(controller.signal)
+      .then((nextContent) => {
+        setContent(nextContent);
+        setIsContentResolved(true);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          // Minimal identity defaults prevent a broken page during temporary API failures.
+          setIsContentResolved(true);
+        }
+      });
     return () => controller.abort();
   }, []);
 
@@ -90,7 +105,7 @@ export function App() {
 
   return (
     <>
-      <Navigation
+      {!isFantasposiPage && !isAuthCallbackPage && <Navigation
         brideName={wedding.brideName}
         groomName={wedding.groomName}
         sections={{
@@ -100,19 +115,21 @@ export function App() {
           info: showInfo,
         }}
         overHero={!isPhotoPage && !isGalleryPage && !isAdminPage}
-      />
-      {isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminAuth /> : <main>
+      />}
+      {isAuthCallbackPage ? <AuthCallback /> : isFantasposiPage ? <FantasposiApp /> : isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminAuth /> : <main>
         <div className="hero-viewport">
           <section id="home" className="hero hero--photo" aria-labelledby="wedding-title">
-            <img
-              className="hero-photo__image"
-              src={wedding.heroPhoto?.previewUrl ?? '/images/serena-enrico-editorial.jpg'}
-              alt={`${wedding.brideName} ed ${wedding.groomName} sorridono con i volti vicini tra gli alberi`}
-              width="2993"
-              height="1995"
-              decoding="async"
-              fetchPriority="high"
-            />
+            {isContentResolved && (
+              <img
+                className="hero-photo__image"
+                src={wedding.heroPhoto?.previewUrl ?? '/images/serena-enrico-editorial.jpg'}
+                alt={`${wedding.brideName} ed ${wedding.groomName} sorridono con i volti vicini tra gli alberi`}
+                width="2993"
+                height="1995"
+                decoding="async"
+                fetchPriority="high"
+              />
+            )}
             <div className="hero-photo__overlay" aria-hidden="true" />
             <div className="hero__content hero-photo__content">
               <p className="script-detail">{wedding.heroEyebrow || 'Ci sposiamo'}</p>
@@ -249,12 +266,12 @@ export function App() {
 
         <GalleryPreview />
       </main>}
-      <footer className="site-footer">
+      {!isAuthCallbackPage && <footer className="site-footer">
         <ThemeDecoration theme={theme} slot="footer" />
         <p className="site-footer__names">{wedding.brideName} &amp; {wedding.groomName}</p>
         <p>{weddingDateLong(wedding.weddingDate)}</p>
         <a href={isPhotoPage || isGalleryPage || isAdminPage ? '/#home' : '#home'}>{isPhotoPage || isGalleryPage || isAdminPage ? 'Torna alla Home' : 'Torna su'} <span aria-hidden="true">↑</span></a>
-      </footer>
+      </footer>}
     </>
   );
 }

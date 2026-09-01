@@ -6,6 +6,19 @@
     <meta name="theme-color" content="" />
     <meta name="description" content="Il matrimonio di Serena ed Enrico — 24 luglio 2027." />
     <title>Serena &amp; Enrico</title>
+    <script>
+      if (window.location.pathname === '/' || window.location.pathname === '/index.html') {
+        document.documentElement.dataset.initialPage = 'home';
+      }
+    </script>
+    <style>
+      html[data-initial-page='home'],
+      html[data-initial-page='home'] body,
+      html[data-initial-page='home'] #root {
+        min-height: 100%;
+        background: #17140f;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

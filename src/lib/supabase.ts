@@ -18,6 +18,7 @@ export type SupabaseSession = {
 const SESSION_STORAGE_KEY = 'wedding.supabase.session';
 let configuration: SupabasePublicConfig | null = null;
 let refreshPromise: Promise<SupabaseSession | null> | null = null;
+let otpRequestPromise: Promise<void> | null = null;
 
 function baseUrl(): string {
   if (!configuration) throw new Error('Supabase Auth is not configured');
@@ -78,15 +79,41 @@ export function configureSupabase(config: SupabasePublicConfig): void {
   };
 }
 
-export async function requestAdminOtp(email: string, emailRedirectTo: string): Promise<void> {
-  await authRequest(`/otp?redirect_to=${encodeURIComponent(emailRedirectTo)}`, {
+export function getSupabasePublicConfig(): SupabasePublicConfig | null {
+  return configuration ? { ...configuration } : null;
+}
+
+export async function requestAdminOtp(email: string): Promise<void> {
+  return requestSupabaseOtp(email, false);
+}
+
+export async function requestSupabaseOtp(
+  email: string,
+  createUser = true,
+): Promise<void> {
+  if (otpRequestPromise) return otpRequestPromise;
+  otpRequestPromise = authRequest('/otp', {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ email, create_user: false }),
+    body: JSON.stringify({
+      email,
+      data: {},
+      create_user: createUser,
+      gotrue_meta_security: {},
+      code_challenge: null,
+      code_challenge_method: null,
+    }),
+  }).then(() => undefined).finally(() => {
+    otpRequestPromise = null;
   });
+  return otpRequestPromise;
 }
 
 export async function verifyAdminOtp(email: string, token: string): Promise<SupabaseSession> {
+  return verifySupabaseOtp(email, token);
+}
+
+export async function verifySupabaseOtp(email: string, token: string): Promise<SupabaseSession> {
   const session = normalizeSession(await authRequest<SupabaseSession>('/verify', {
     method: 'POST',
     headers: authHeaders(),
@@ -169,9 +196,13 @@ export async function getAdminSession(): Promise<SupabaseSession | null> {
   return expiresAt > Math.floor(Date.now() / 1000) + 60 ? session : refreshSession(session);
 }
 
+export const getSupabaseSession = getAdminSession;
+
 export async function getAdminAccessToken(): Promise<string | null> {
   return (await getAdminSession())?.access_token ?? null;
 }
+
+export const getSupabaseAccessToken = getAdminAccessToken;
 
 export async function signOutAdmin(): Promise<void> {
   const session = storedSession();
@@ -181,4 +212,27 @@ export async function signOutAdmin(): Promise<void> {
     method: 'POST',
     headers: authHeaders(session.access_token),
   }).catch(() => undefined);
+}
+
+export const signOutSupabase = signOutAdmin;
+
+const AUTH_DESTINATION_PATTERN = /^\/fantasposi(?:\/[a-z0-9-]+)*\/?$/;
+
+export function normalizeAuthDestination(value: string | null | undefined, fallback = '/fantasposi'): string {
+  const normalizedFallback = fallback === '/admin' || AUTH_DESTINATION_PATTERN.test(fallback)
+    ? fallback.replace(/\/$/, '') || '/fantasposi'
+    : '/fantasposi';
+  if (!value) return normalizedFallback;
+  if (value === '/admin' || AUTH_DESTINATION_PATTERN.test(value)) {
+    return value.replace(/\/$/, '') || normalizedFallback;
+  }
+  return normalizedFallback;
+}
+
+export function startSupabaseOAuth(provider: 'google', nextPath: string): void {
+  const safeNext = normalizeAuthDestination(nextPath);
+  const callbackUrl = new URL('/auth/callback', window.location.origin);
+  callbackUrl.searchParams.set('next', safeNext);
+  const parameters = new URLSearchParams({ provider, redirect_to: callbackUrl.toString() });
+  window.location.assign(`${baseUrl()}/auth/v1/authorize?${parameters.toString()}`);
 }

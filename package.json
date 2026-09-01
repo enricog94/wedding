@@ -12,10 +12,14 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "data:migrate:supabase": "node scripts/migrate-d1-to-supabase.mjs",
+    "fantasposi:seed:phases": "node scripts/seed-fantasposi-phases.mjs",
+    "fantasposi:seed:demo": "node scripts/seed-fantasposi-demo-missions.mjs",
+    "fantasposi:seed:predictions": "node scripts/seed-fantasposi-demo-predictions.mjs",
     "supabase:db:push": "npx supabase db push",
     "deploy": "npm run build && wrangler deploy --no-x-provision"
   },
   "dependencies": {
+    "@supabase/realtime-js": "^2.112.4",
     "pg": "^8.16.3",
     "react": "19.2.6",
     "react-dom": "19.2.6"

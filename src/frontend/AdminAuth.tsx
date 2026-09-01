@@ -4,6 +4,7 @@ import {
   getAdminSession,
   requestAdminOtp,
   signOutAdmin,
+  startSupabaseOAuth,
   verifyAdminOtp,
   type SupabasePublicConfig,
   type SupabaseSession,
@@ -31,10 +32,13 @@ async function authorizeSession(session: SupabaseSession): Promise<AuthState> {
 export function AdminAuth() {
   const [auth, setAuth] = useState<AuthState>({ status: 'loading' });
   const [email, setEmail] = useState('');
+  const [otpEmail, setOtpEmail] = useState('');
   const [code, setCode] = useState('');
   const [codeRequested, setCodeRequested] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [resendLocked, setResendLocked] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,13 +63,36 @@ export function AdminAuth() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    if (!resendLocked) return undefined;
+    const timeout = window.setTimeout(() => setResendLocked(false), 60_000);
+    return () => window.clearTimeout(timeout);
+  }, [resendLocked]);
+
   const requestCode = async (event: FormEvent) => {
     event.preventDefault();
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
-      const emailRedirectTo = `${window.location.origin}/admin`;
-      await requestAdminOtp(email.trim(), emailRedirectTo);
+      const requestedEmail = email.trim();
+      await requestAdminOtp(requestedEmail);
+      setOtpEmail(requestedEmail);
       setCodeRequested(true);
+      setResendLocked(true);
+      setNotice(`Abbiamo inviato un codice a ${requestedEmail}. Usa l’ultimo codice ricevuto.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Invio del codice non riuscito.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendCode = async () => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await requestAdminOtp(otpEmail);
+      setCode('');
+      setResendLocked(true);
+      setNotice(`Nuovo codice inviato a ${otpEmail}. Il codice precedente non è più valido.`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Invio del codice non riuscito.');
     } finally {
@@ -77,7 +104,7 @@ export function AdminAuth() {
     event.preventDefault();
     setBusy(true); setError('');
     try {
-      const session = await verifyAdminOtp(email.trim(), code.trim());
+      const session = await verifyAdminOtp(otpEmail, code);
       setAuth(await authorizeSession(session));
     } catch (verifyError) {
       setError(verifyError instanceof Error ? verifyError.message : 'Codice non valido o scaduto.');
@@ -119,6 +146,10 @@ export function AdminAuth() {
         <p className="section-title__eyebrow">Area riservata</p>
         <h1 id="admin-login-title">Accesso amministratore</h1>
         <p>Ricevi via email il codice temporaneo per accedere al pannello.</p>
+        <button type="button" disabled={busy} onClick={() => startSupabaseOAuth('google', '/admin')}>
+          Continua con Google
+        </button>
+        <div className="admin-login__separator"><span>oppure</span></div>
         <form onSubmit={codeRequested ? verifyCode : requestCode}>
           <label>
             Email
@@ -140,16 +171,21 @@ export function AdminAuth() {
                 onChange={(event) => setCode(event.target.value)}
                 inputMode="numeric"
                 autoComplete="one-time-code"
+                pattern="[0-9]+"
                 required
               />
             </label>
           )}
+          {notice && <p className="admin-login__notice" role="status">{notice}</p>}
           {error && <p className="admin-state admin-state--error" role="alert">{error}</p>}
           <button type="submit" disabled={busy}>{codeRequested ? 'Accedi' : 'Invia codice'}</button>
           {codeRequested && (
-            <button type="button" disabled={busy} onClick={() => { setCodeRequested(false); setCode(''); setError(''); }}>
-              Usa un’altra email
-            </button>
+            <>
+              <button type="button" disabled={busy || resendLocked} onClick={() => void resendCode()}>
+                {resendLocked ? 'Attendi prima di reinviare' : 'Invia di nuovo'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => { setCodeRequested(false); setOtpEmail(''); setCode(''); setError(''); setNotice(''); }}>Usa un’altra email</button>
+            </>
           )}
         </form>
       </section>

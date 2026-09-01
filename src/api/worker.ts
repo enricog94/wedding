@@ -1,4 +1,6 @@
 import { handleContentRequest } from './content';
+import { handleFantasposiRequest } from './fantasposi';
+import { handleAdminFantasposiRequest } from './fantasposi-admin';
 import { createPostgresDatabase, type Database } from '../lib/supabase-db';
 
 export interface WorkerEnv {
@@ -1076,6 +1078,9 @@ export default {
       return json({ supabaseUrl, anonKey });
     }
 
+    const fantasposiResponse = await handleFantasposiRequest(request, env);
+    if (fantasposiResponse) return fantasposiResponse;
+
     const adminAuthorization = url.pathname.startsWith('/api/admin/')
       ? await requireAdmin(request, env)
       : null;
@@ -1089,6 +1094,11 @@ export default {
         email: adminAuthorization.identity.email ?? null,
       });
     }
+
+    const adminFantasposiResponse = adminAuthorization?.authorized
+      ? await handleAdminFantasposiRequest(request, env)
+      : null;
+    if (adminFantasposiResponse) return adminFantasposiResponse;
 
     const contentResponse = await handleContentRequest(request, env);
     if (contentResponse) return contentResponse;

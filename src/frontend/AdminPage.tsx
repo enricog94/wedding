@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AdminContent } from './AdminContent';
+import { AdminFantasposi } from './AdminFantasposi';
 import { adminFetch } from './adminApi';
 import { useAdminImageUrl } from './useAdminImageUrl';
 
 type MediaStatus = 'uploading' | 'pending' | 'approved' | 'hidden';
 type MediaSource = 'guest' | 'photobooth' | 'admin';
-type AdminTab = 'dashboard' | 'content' | 'gallery' | 'settings';
+type AdminTab = 'dashboard' | 'content' | 'gallery' | 'fantasposi' | 'settings';
 type MediaAction = 'approve' | 'hide' | 'restore';
 type BulkAction = 'approve' | 'hide' | 'delete';
 
@@ -188,7 +189,7 @@ export function AdminPage({ adminEmail, onLogout }: AdminPageProps) {
   }).toString(), [sourceFilter, statusFilter, tab]);
 
   const loadMedia = useCallback(async () => {
-    if (tab === 'settings' || tab === 'content') return;
+    if (tab === 'settings' || tab === 'content' || tab === 'fantasposi') return;
     setLoading(true);
     setMediaError('');
     try {
@@ -369,6 +370,7 @@ export function AdminPage({ adminEmail, onLogout }: AdminPageProps) {
         <button type="button" className={tab === 'dashboard' ? 'is-active' : ''} onClick={() => setTab('dashboard')}>Dashboard</button>
         <button type="button" className={tab === 'content' ? 'is-active' : ''} onClick={() => setTab('content')}>Contenuti</button>
         <button type="button" className={tab === 'gallery' ? 'is-active' : ''} onClick={() => setTab('gallery')}>Gallery</button>
+        <button type="button" className={tab === 'fantasposi' ? 'is-active' : ''} onClick={() => setTab('fantasposi')}>FantaSposi</button>
         <button type="button" className={tab === 'settings' ? 'is-active' : ''} onClick={() => setTab('settings')}>Impostazioni</button>
       </nav>
 
@@ -439,6 +441,8 @@ export function AdminPage({ adminEmail, onLogout }: AdminPageProps) {
       )}
 
       {tab === 'content' && <AdminContent />}
+
+      {tab === 'fantasposi' && <AdminFantasposi />}
 
       {tab === 'settings' && (
         <section className="admin-settings" aria-labelledby="admin-settings-title">
