@@ -12,6 +12,14 @@ export type EffectiveMissionStatus =
 
 export type EffectivePredictionStatus = 'scheduled' | 'open' | 'closed' | 'resolved';
 
+export type FantasposiGameState = 'setup' | 'active' | 'finished';
+
+export type FantasposiMutationBlock = {
+  status: 409;
+  code: 'game_not_active' | 'game_finished';
+  error: string;
+};
+
 export type MissionTiming = {
   active: boolean;
   phaseStatus: string;
@@ -45,6 +53,32 @@ function parsedInstant(value: string | null): number | null | undefined {
   if (value === null) return null;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+export function fantasposiMutationBlock(
+  state: FantasposiGameState,
+): FantasposiMutationBlock | null {
+  if (state === 'active') return null;
+  return state === 'finished'
+    ? { status: 409, code: 'game_finished', error: 'Il FantaSposi è concluso.' }
+    : { status: 409, code: 'game_not_active', error: 'Il FantaSposi non è ancora iniziato.' };
+}
+
+export function isValidFantasposiResetConfirmation(value: unknown): boolean {
+  return value === 'RESET FANTASPOSI';
+}
+
+export function formatFantasposiCountdown(target: string | null, now: number): string | null {
+  const targetTime = parsedInstant(target);
+  if (targetTime === null || targetTime === undefined) return null;
+  const seconds = Math.max(0, Math.ceil((targetTime - now) / 1_000));
+  const hours = Math.floor(seconds / 3_600);
+  const days = Math.floor(hours / 24);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const remainingSeconds = seconds % 60;
+  if (days > 0) return `${days}g ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
 }
 
 export function effectiveMissionStatus(

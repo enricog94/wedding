@@ -1,5 +1,6 @@
 import type { Database } from '../lib/supabase-db';
 import {
+  fantasposiMutationBlock,
   isPhotoProofOriginalKey,
   missionRequiresPhotoProof,
   parsePhotoProofCreateInput,
@@ -7,6 +8,7 @@ import {
   parsePositiveInteger,
   photoProofPrefix,
   selectHomeMissionRecommendations,
+  type FantasposiGameState,
 } from '../lib/fantasposi-domain';
 import {
   FANTASPOSI_PROOF_SOURCE,
@@ -38,6 +40,7 @@ type WeddingRow = {
   bride_name: string;
   groom_name: string;
   wedding_date: string;
+  fantasposi_status: FantasposiGameState;
 };
 
 type PlayerRow = {
@@ -210,11 +213,16 @@ async function currentWedding(env: FantasposiEnv): Promise<WeddingRow | null> {
   const slug = env.CURRENT_WEDDING_SLUG?.trim();
   if (!slug) throw new Error('CURRENT_WEDDING_SLUG is not configured');
   return env.DB.prepare(
-    `SELECT id, slug, bride_name, groom_name, wedding_date
+    `SELECT id, slug, bride_name, groom_name, wedding_date, fantasposi_status
      FROM weddings
      WHERE slug = ?
      LIMIT 1`,
   ).bind(slug).first<WeddingRow>();
+}
+
+function gameMutationResponse(wedding: WeddingRow): Response | null {
+  const block = fantasposiMutationBlock(wedding.fantasposi_status);
+  return block ? json({ error: block.error, code: block.code }, block.status) : null;
 }
 
 async function playerForUser(
@@ -466,6 +474,8 @@ async function answerPredictionResponse(
 ): Promise<Response> {
   const resolved = await context(request, env);
   if (!resolved.ok) return resolved.response;
+  const gameBlock = gameMutationResponse(resolved.wedding);
+  if (gameBlock) return gameBlock;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
   let input: unknown;
@@ -489,6 +499,10 @@ async function answerPredictionResponse(
        LEFT JOIN fantasposi_phases phase
          ON phase.id = prediction.phase_id AND phase.wedding_id = prediction.wedding_id
        WHERE prediction.id = ? AND prediction.wedding_id = ? AND option.id = ?
+         AND EXISTS (
+           SELECT 1 FROM weddings wedding
+           WHERE wedding.id = prediction.wedding_id AND wedding.fantasposi_status = 'active'
+         )
          AND prediction.active = true AND prediction.status = 'open'
          AND (prediction.opens_at IS NULL OR prediction.opens_at <= CURRENT_TIMESTAMP)
          AND (prediction.closes_at IS NULL OR prediction.closes_at > CURRENT_TIMESTAMP)
@@ -626,6 +640,7 @@ async function bootstrapResponse(request: Request, env: FantasposiEnv): Promise<
     .all<{ team: 'bride' | 'groom'; points: number }>();
 
   return json({
+    gameState: resolved.wedding.fantasposi_status,
     wedding: serializeWedding(resolved.wedding),
     player: { ...serializedPlayer, points: summary.total_points },
     currentPhase,
@@ -817,6 +832,8 @@ async function createPhotoProofResponse(
 ): Promise<Response> {
   const resolved = await context(request, env);
   if (!resolved.ok) return resolved.response;
+  const gameBlock = gameMutationResponse(resolved.wedding);
+  if (gameBlock) return gameBlock;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
 
@@ -852,13 +869,20 @@ async function createPhotoProofResponse(
        uuid, wedding_id, uploader_user_id, source, original_filename, original_key,
        mime_type, size_bytes, status, preview_status
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'uploading', 'pending')
+     SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'uploading', 'pending'
+     WHERE EXISTS (
+       SELECT 1 FROM weddings WHERE id = ? AND fantasposi_status = 'active'
+     )
      RETURNING id`,
   ).bind(
     uuid, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
-    filename, originalKey, mimeType, size,
+    filename, originalKey, mimeType, size, resolved.wedding.id,
   ).first<{ id: number }>();
-  if (!created) throw new Error('PostgreSQL did not create the photo proof media');
+  if (!created) {
+    const current = await currentWedding(env);
+    const block = current ? gameMutationResponse(current) : null;
+    return block ?? json({ error: 'Photo proof could not be created' }, 409);
+  }
 
   return json({
     mediaId: created.id,
@@ -878,6 +902,8 @@ async function completePhotoProofUploadResponse(
 ): Promise<Response> {
   const resolved = await context(request, env);
   if (!resolved.ok) return resolved.response;
+  const gameBlock = gameMutationResponse(resolved.wedding);
+  if (gameBlock) return gameBlock;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
 
@@ -907,7 +933,11 @@ async function completePhotoProofUploadResponse(
       `UPDATE media
        SET status = 'pending', uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
        WHERE id = ? AND wedding_id = ? AND uploader_user_id = ?
-         AND source = ? AND status = 'uploading'
+          AND source = ? AND status = 'uploading'
+          AND EXISTS (
+            SELECT 1 FROM weddings wedding
+            WHERE wedding.id = media.wedding_id AND wedding.fantasposi_status = 'active'
+          )
        RETURNING id, status, uploaded_at`,
     ).bind(
       media.id, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
@@ -996,7 +1026,11 @@ async function completePhotoMissionResponse(
        AND completion.mission_id = mission.id AND completion.mission_id = ?
        AND completion.status <> 'completed'
        AND mission.wedding_id = completion.wedding_id
-       AND mission.mission_type = 'photo' AND mission.active = true
+        AND mission.mission_type = 'photo' AND mission.active = true
+        AND EXISTS (
+          SELECT 1 FROM weddings wedding
+          WHERE wedding.id = mission.wedding_id AND wedding.fantasposi_status = 'active'
+        )
        AND phase.status = 'active'
        AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
        AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
@@ -1027,7 +1061,11 @@ async function completePhotoMissionResponse(
       AND media.uploader_user_id = ? AND media.source = ?
       AND media.mime_type LIKE 'image/%' AND media.status = 'pending'
       AND media.uploaded_at IS NOT NULL AND media.original_key LIKE ?
-     WHERE mission.id = ? AND mission.wedding_id = ?
+      WHERE mission.id = ? AND mission.wedding_id = ?
+        AND EXISTS (
+          SELECT 1 FROM weddings wedding
+          WHERE wedding.id = mission.wedding_id AND wedding.fantasposi_status = 'active'
+        )
        AND mission.mission_type = 'photo' AND mission.active = true
        AND phase.status = 'active'
        AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
@@ -1073,6 +1111,8 @@ async function completeMissionResponse(
 ): Promise<Response> {
   const resolved = await context(request, env);
   if (!resolved.ok) return resolved.response;
+  const gameBlock = gameMutationResponse(resolved.wedding);
+  if (gameBlock) return gameBlock;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
 
@@ -1100,6 +1140,10 @@ async function completeMissionResponse(
        AND completion.mission_id = ?
        AND completion.status <> 'completed'
        AND mission.wedding_id = completion.wedding_id
+       AND EXISTS (
+         SELECT 1 FROM weddings wedding
+         WHERE wedding.id = mission.wedding_id AND wedding.fantasposi_status = 'active'
+       )
        AND mission.active = true
        AND phase.status = 'active'
        AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
@@ -1122,6 +1166,10 @@ async function completeMissionResponse(
          ON phase.id = mission.phase_id AND phase.wedding_id = mission.wedding_id
        WHERE mission.id = ?
          AND mission.wedding_id = ?
+         AND EXISTS (
+           SELECT 1 FROM weddings wedding
+           WHERE wedding.id = mission.wedding_id AND wedding.fantasposi_status = 'active'
+         )
          AND mission.active = true
          AND phase.status = 'active'
          AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
@@ -1253,6 +1301,19 @@ async function onboardingResponse(request: Request, env: FantasposiEnv): Promise
   }
   if (team !== 'bride' && team !== 'groom') {
     return json({ error: 'Team must be bride or groom' }, 400);
+  }
+
+  const existingPlayer = await playerForUser(env, resolved.wedding.id, resolved.user.id);
+  if (resolved.wedding.fantasposi_status === 'finished') {
+    return json({ error: 'Il FantaSposi è concluso.', code: 'game_finished' }, 409);
+  }
+  if (resolved.wedding.fantasposi_status === 'active'
+    && existingPlayer?.onboarding_completed
+    && existingPlayer.team !== team) {
+    return json({
+      error: 'Il team non può essere cambiato dopo l’avvio del FantaSposi.',
+      code: 'team_locked',
+    }, 409);
   }
 
   const result = await env.DB.prepare(

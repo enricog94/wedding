@@ -1,12 +1,17 @@
 import type { Database } from '../lib/supabase-db';
-import { isValidTimeWindow, parseOptionalTimestamp } from '../lib/fantasposi-domain';
+import {
+  isValidTimeWindow,
+  isValidFantasposiResetConfirmation,
+  parseOptionalTimestamp,
+  type FantasposiGameState,
+} from '../lib/fantasposi-domain';
 
 type AdminFantasyEnv = {
   DB: Database;
   CURRENT_WEDDING_SLUG: string;
 };
 
-type WeddingRow = { id: number; slug: string };
+type WeddingRow = { id: number; slug: string; fantasposi_status: FantasposiGameState };
 type PhaseStatus = 'locked' | 'active' | 'completed';
 
 type AdminPhaseRow = {
@@ -64,7 +69,7 @@ function json(data: unknown, status = 200): Response {
 async function currentWedding(env: AdminFantasyEnv): Promise<WeddingRow | null> {
   const slug = env.CURRENT_WEDDING_SLUG?.trim();
   if (!slug) throw new Error('CURRENT_WEDDING_SLUG is not configured');
-  return env.DB.prepare('SELECT id, slug FROM weddings WHERE slug = ? LIMIT 1')
+  return env.DB.prepare('SELECT id, slug, fantasposi_status FROM weddings WHERE slug = ? LIMIT 1')
     .bind(slug)
     .first<WeddingRow>();
 }
@@ -351,6 +356,9 @@ async function overviewResponse(env: AdminFantasyEnv, weddingId: number): Promis
      WHERE player.wedding_id = ? AND player.active = true GROUP BY player.team`,
   ).bind(weddingId, weddingId, weddingId).all<{ team: 'bride' | 'groom'; points: number }>();
   return json({
+    gameState: (await env.DB.prepare(
+      'SELECT fantasposi_status FROM weddings WHERE id = ? LIMIT 1',
+    ).bind(weddingId).first<{ fantasposi_status: FantasposiGameState }>())?.fantasposi_status ?? 'setup',
     activePlayers: overview?.active_players ?? 0,
     activeMissions: overview?.active_missions ?? 0,
     completions: overview?.completions ?? 0,
@@ -359,6 +367,93 @@ async function overviewResponse(env: AdminFantasyEnv, weddingId: number): Promis
       bride: teams.results.find((team) => team.team === 'bride')?.points ?? 0,
       groom: teams.results.find((team) => team.team === 'groom')?.points ?? 0,
     },
+  });
+}
+
+async function transitionGameState(
+  env: AdminFantasyEnv,
+  wedding: WeddingRow,
+  action: 'start' | 'finish',
+): Promise<Response> {
+  const expected: FantasposiGameState = action === 'start' ? 'setup' : 'active';
+  const target: FantasposiGameState = action === 'start' ? 'active' : 'finished';
+  if (wedding.fantasposi_status === target) {
+    return json({ gameState: target, changed: false });
+  }
+  if (wedding.fantasposi_status !== expected) {
+    return json({
+      error: action === 'start'
+        ? 'Il FantaSposi può essere avviato solo dalla preparazione.'
+        : 'Il FantaSposi può essere chiuso solo mentre è in corso.',
+      code: 'invalid_game_transition',
+      gameState: wedding.fantasposi_status,
+    }, 409);
+  }
+  const updated = await env.DB.prepare(
+    `UPDATE weddings
+     SET fantasposi_status = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND fantasposi_status = ?
+     RETURNING fantasposi_status`,
+  ).bind(target, wedding.id, expected).first<{ fantasposi_status: FantasposiGameState }>();
+  if (updated) return json({ gameState: updated.fantasposi_status, changed: true });
+  const current = await env.DB.prepare(
+    'SELECT fantasposi_status FROM weddings WHERE id = ? LIMIT 1',
+  ).bind(wedding.id).first<{ fantasposi_status: FantasposiGameState }>();
+  return json({
+    error: 'Lo stato del gioco è cambiato durante l’operazione.',
+    code: 'game_state_conflict',
+    gameState: current?.fantasposi_status ?? null,
+  }, 409);
+}
+
+async function resetGameResponse(
+  request: Request,
+  env: AdminFantasyEnv,
+  wedding: WeddingRow,
+): Promise<Response> {
+  const body = await request.json().catch(() => null) as { confirmation?: unknown } | null;
+  if (!isValidFantasposiResetConfirmation(body?.confirmation)) {
+    return json({ error: 'Conferma reset non valida.', code: 'invalid_reset_confirmation' }, 400);
+  }
+  const result = await env.DB.prepare(
+    `WITH target AS MATERIALIZED (
+       SELECT id FROM weddings WHERE id = ?
+     ), deleted_missions AS (
+       DELETE FROM fantasposi_player_missions completion
+       USING target
+       WHERE completion.wedding_id = target.id
+       RETURNING completion.media_id
+     ), deleted_predictions AS (
+       DELETE FROM fantasposi_player_predictions response
+       USING target
+       WHERE response.wedding_id = target.id
+       RETURNING response.id
+     ), reset_wedding AS (
+       UPDATE weddings wedding
+       SET fantasposi_status = 'setup', updated_at = CURRENT_TIMESTAMP
+       FROM target
+       WHERE wedding.id = target.id
+         AND (SELECT COUNT(*) FROM deleted_missions) >= 0
+         AND (SELECT COUNT(*) FROM deleted_predictions) >= 0
+       RETURNING wedding.fantasposi_status
+     )
+     SELECT reset_wedding.fantasposi_status,
+            (SELECT COUNT(*)::integer FROM deleted_missions) AS deleted_completions,
+            (SELECT COUNT(*)::integer FROM deleted_predictions) AS deleted_answers,
+            (SELECT COUNT(*)::integer FROM deleted_missions WHERE media_id IS NOT NULL) AS orphaned_proofs
+     FROM reset_wedding`,
+  ).bind(wedding.id).first<{
+    fantasposi_status: FantasposiGameState;
+    deleted_completions: number;
+    deleted_answers: number;
+    orphaned_proofs: number;
+  }>();
+  if (!result) return json({ error: 'Reset FantaSposi non riuscito.' }, 500);
+  return json({
+    gameState: result.fantasposi_status,
+    deletedCompletions: result.deleted_completions,
+    deletedAnswers: result.deleted_answers,
+    orphanedProofs: result.orphaned_proofs,
   });
 }
 
@@ -375,6 +470,15 @@ export async function handleAdminFantasposiRequest(
 
     if (request.method === 'GET' && url.pathname === '/api/admin/fantasposi/overview') {
       return overviewResponse(env, wedding.id);
+    }
+    if (request.method === 'POST' && url.pathname === '/api/admin/fantasposi/game/start') {
+      return transitionGameState(env, wedding, 'start');
+    }
+    if (request.method === 'POST' && url.pathname === '/api/admin/fantasposi/game/finish') {
+      return transitionGameState(env, wedding, 'finish');
+    }
+    if (request.method === 'POST' && url.pathname === '/api/admin/fantasposi/game/reset') {
+      return resetGameResponse(request, env, wedding);
     }
     if (request.method === 'GET' && url.pathname === '/api/admin/fantasposi/phases') {
       return json({ phases: (await listPhases(env, wedding.id)).map(serializePhase) });

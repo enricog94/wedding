@@ -5,6 +5,13 @@ Nessuna voce `MISSING` o `OPTIONAL` è stata implementata durante questo audit.
 
 ## DONE
 
+- **Lifecycle core:** `setup → active → finished`, controlli admin, blocchi
+  server-side delle mutation e risultati finali derivati dai ledger.
+- **Reset partita:** wedding-scoped e atomico sui dati player; conserva account,
+  team e cataloghi. Le proof orfane richiedono cleanup separato.
+- **PWA:** manifest, icone, install UX e cache esclusivamente statica; il gioco
+  richiede rete e non accoda azioni offline.
+
 - **Login:** Supabase Auth con OTP email e Google OAuth predisposto; sessione,
   refresh e logout condivisi.
 - **Onboarding:** nome visualizzato, scelta Team sposa/sposo e membership scoped

@@ -431,6 +431,92 @@
   margin-top: 1.5rem;
 }
 
+.fantasposi-install {
+  width: min(100%, 22rem);
+  border-block: 1px solid var(--color-border);
+  margin-top: 1.5rem;
+  padding: 1.25rem 0;
+}
+
+.fantasposi-install h2 {
+  margin: 0 0 0.6rem;
+  font: 600 1.45rem/1.1 var(--font-display);
+}
+
+.fantasposi-install p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.fantasposi-offline {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  color: var(--color-paper);
+  background: #76544d;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.fantasposi-final {
+  width: min(100%, 46rem);
+  margin: 0 auto;
+}
+
+.fantasposi-final h1 {
+  margin: 0.4rem 0 1rem;
+  font: 600 clamp(3rem, 12vw, 5.5rem)/0.92 var(--font-display);
+}
+
+.fantasposi-final__winner {
+  margin: 0 0 2rem;
+  color: var(--color-primary);
+  font: italic 600 clamp(1.5rem, 6vw, 2.2rem)/1.1 var(--font-display);
+}
+
+.fantasposi-final__personal {
+  display: grid;
+  gap: 0.35rem;
+  border-block: 1px solid var(--color-border);
+  padding: 1.25rem 0;
+}
+
+.fantasposi-final__personal > strong {
+  color: var(--color-primary);
+  font: 600 3rem/0.9 var(--font-display);
+}
+
+.fantasposi-final__personal > span {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+}
+
+.fantasposi-final__podium {
+  margin-top: 2rem;
+}
+
+.fantasposi-final__podium h2 {
+  font: 600 2rem/1 var(--font-display);
+}
+
+.fantasposi-final__podium ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fantasposi-final__podium li {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.9rem 0;
+}
+
 .fantasposi-how-to {
   width: min(100%, 42rem);
   margin: 0 auto;
@@ -3731,6 +3817,62 @@ button.gallery-item:hover .gallery-item__image {
 .admin-fantasposi__overview {
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.admin-fantasposi__game-state {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid var(--color-line);
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--color-paper);
+}
+
+.admin-fantasposi__game-state > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.admin-fantasposi__game-state > div:first-child > span {
+  color: var(--color-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-fantasposi__game-state > div:first-child > strong {
+  color: var(--color-olive);
+  font: 600 1.5rem/1 var(--font-display);
+}
+
+.admin-fantasposi__danger-zone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid #b78d83;
+  padding-top: 1rem;
+}
+
+.admin-fantasposi__danger-zone p {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.admin-fantasposi__danger-zone p span,
+.admin-fantasposi__countdown {
+  color: var(--color-muted);
+  font-size: 0.7rem;
+}
+
+.admin-fantasposi__countdown {
+  color: var(--color-olive) !important;
+  font-weight: 700;
 }
 
 .admin-fantasposi__overview div {

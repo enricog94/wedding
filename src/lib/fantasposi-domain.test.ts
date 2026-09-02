@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveMissionStatus,
+  fantasposiMutationBlock,
+  formatFantasposiCountdown,
+  isValidFantasposiResetConfirmation,
   effectivePredictionStatus,
   isPhotoProofOriginalKey,
   isValidTimeWindow,
@@ -28,6 +31,27 @@ const mission = (overrides: Partial<RecommendedMissionCandidate> = {}): Recommen
   opensAt: null,
   closesAt: null,
   ...overrides,
+});
+
+describe('game lifecycle', () => {
+  it('allows scoring mutations only while active', () => {
+    expect(fantasposiMutationBlock('active')).toBeNull();
+    expect(fantasposiMutationBlock('setup')).toMatchObject({ code: 'game_not_active', status: 409 });
+    expect(fantasposiMutationBlock('finished')).toMatchObject({ code: 'game_finished', status: 409 });
+  });
+
+  it('formats the shared live countdown without negative values', () => {
+    expect(formatFantasposiCountdown('2027-07-24T12:02:15.000Z', now)).toBe('02:15');
+    expect(formatFantasposiCountdown('2027-07-24T14:02:00.000Z', now)).toBe('2h 02m');
+    expect(formatFantasposiCountdown(before, now)).toBe('00:00');
+    expect(formatFantasposiCountdown('invalid', now)).toBeNull();
+  });
+
+  it('requires the exact destructive reset confirmation', () => {
+    expect(isValidFantasposiResetConfirmation('RESET FANTASPOSI')).toBe(true);
+    expect(isValidFantasposiResetConfirmation('reset fantasposi')).toBe(false);
+    expect(isValidFantasposiResetConfirmation(null)).toBe(false);
+  });
 });
 
 describe('mission time windows', () => {

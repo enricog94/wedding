@@ -36,6 +36,23 @@ DB, R2 e completion non formano una transazione distribuita. Un upload
 finalizzato ma non collegato a una completion può restare in R2/`media`. Serve
 una procedura schedulata o un runbook che elimini soltanto proof
 `fantasposi_proof` non referenziate e più vecchie di una soglia sicura.
+Il reset partita aumenta intenzionalmente questo insieme: la risposta admin
+riporta il numero di proof scollegate, ma non tenta una transazione distribuita
+PostgreSQL/R2.
+
+### Test integrazione lifecycle e reset
+
+I helper di stato, timing e conferma sono coperti da test puri. Prima del
+matrimonio serve una suite di integrazione su database isolato per start,
+finish, reset vuoto, reset con ledger, doppio reset e isolamento tra wedding,
+inclusa la verifica 403 per un player normale. La protezione HTTP admin resta
+quella server-side già condivisa da `/api/admin/*`.
+
+### Asset PWA definitivi
+
+Le icone vettoriali correnti sono coerenti e installabili ma volutamente
+minimali. Prima del rilascio finale valutare PNG 192/512 e maskable esportati
+dall'identità grafica definitiva, senza cambiare la strategia di cache.
 
 ### Strumenti operativi per le proof
 

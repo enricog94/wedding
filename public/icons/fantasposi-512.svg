@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="FantaSposi">
+  <rect width="512" height="512" fill="#66715a"/>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#d8c5a2" stroke-width="6"/>
+  <path d="M144 346V166h114v27h-80v52h70v27h-70v74zm150 0V166h35v151h78v29z" fill="#f7f3ea"/>
+</svg>

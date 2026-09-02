@@ -1,5 +1,11 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
+import {
+  effectiveMissionStatus,
+  formatFantasposiCountdown,
+  type FantasposiGameState,
+} from '../lib/fantasposi-domain';
 import { adminFetch } from './adminApi';
+import { useFantasposiClock } from './useFantasposiRealtime';
 
 type Section = 'overview' | 'phases' | 'missions' | 'predictions';
 type PhaseStatus = 'locked' | 'active' | 'completed';
@@ -32,6 +38,7 @@ type Mission = {
 };
 
 type Overview = {
+  gameState: FantasposiGameState;
   activePlayers: number;
   activeMissions: number;
   completions: number;
@@ -104,6 +111,10 @@ const missionStatusLabels: Record<Mission['effectiveStatus'], string> = {
   expired: 'SCADUTA',
 };
 
+const gameStateLabels: Record<FantasposiGameState, string> = {
+  setup: 'Preparazione', active: 'In corso', finished: 'Concluso',
+};
+
 function adminPredictionTime(value: string | null): string {
   return value
     ? new Intl.DateTimeFormat('it-IT', {
@@ -141,6 +152,9 @@ export function AdminFantasposi() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
+  const missionClockEnabled = section === 'missions'
+    && missions.some((mission) => mission.opensAt !== null || mission.closesAt !== null);
+  const missionNow = useFantasposiClock(missionClockEnabled);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -344,6 +358,43 @@ export function AdminFantasposi() {
     } finally { setBusy(false); }
   };
 
+  const gameAction = async (action: 'start' | 'finish' | 'reset') => {
+    let body: string | undefined;
+    if (action === 'finish' && !window.confirm('Chiudere FantaSposi e congelare il punteggio finale?')) return;
+    if (action === 'reset') {
+      const confirmation = window.prompt(
+        'Questa operazione elimina completamenti e risposte del wedding. Digita RESET FANTASPOSI per continuare:',
+      );
+      if (confirmation !== 'RESET FANTASPOSI') {
+        setError('Reset annullato: conferma non valida.');
+        return;
+      }
+      body = JSON.stringify({ confirmation });
+    }
+    setBusy(true); setError(''); setFeedback('');
+    try {
+      const result = await api<{
+        gameState: FantasposiGameState;
+        deletedCompletions?: number;
+        deletedAnswers?: number;
+        orphanedProofs?: number;
+      }>(`/api/admin/fantasposi/game/${action}`, {
+        method: 'POST',
+        ...(body ? { headers: { 'content-type': 'application/json' }, body } : {}),
+      });
+      setFeedback(action === 'start'
+        ? 'FantaSposi avviato.'
+        : action === 'finish'
+          ? 'FantaSposi concluso. Il punteggio è ora congelato.'
+          : `Gioco reinizializzato: ${result.deletedCompletions ?? 0} completamenti e ${result.deletedAnswers ?? 0} risposte rimossi. ${result.orphanedProofs ?? 0} proof restano da pulire separatamente.`);
+      await load();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : 'Operazione sul gioco non riuscita.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="admin-fantasposi" aria-labelledby="admin-fantasposi-title">
       <header className="admin-fantasposi__heading"><div><p>Gioco invitati</p><h2 id="admin-fantasposi-title">FantaSposi</h2></div><button type="button" disabled={busy || loading} onClick={() => void load()}>Aggiorna</button></header>
@@ -356,6 +407,13 @@ export function AdminFantasposi() {
       {error && <p className="admin-state admin-state--error" role="alert">{error}</p>}
       {feedback && <p className="admin-feedback" role="status">{feedback}</p>}
       {loading && <p className="admin-state">Caricamento FantaSposi…</p>}
+
+      {!loading && overview && <section className="admin-fantasposi__game-state" aria-labelledby="fantasposi-game-state-title">
+        <div><span id="fantasposi-game-state-title">Stato gioco</span><strong className={`is-${overview.gameState}`}>{gameStateLabels[overview.gameState]}</strong></div>
+        {overview.gameState === 'setup' && <button type="button" disabled={busy} onClick={() => void gameAction('start')}>Avvia FantaSposi</button>}
+        {overview.gameState === 'active' && <button type="button" disabled={busy} onClick={() => void gameAction('finish')}>Chiudi FantaSposi</button>}
+        <div className="admin-fantasposi__danger-zone"><p><strong>Danger zone</strong><span>Elimina completamenti e risposte, conserva giocatori, team e catalogo.</span></p><button className="admin-danger" type="button" disabled={busy} onClick={() => void gameAction('reset')}>Reset FantaSposi</button></div>
+      </section>}
 
       {!loading && section === 'overview' && overview && <div className="admin-fantasposi__overview">{[
         ['Giocatori attivi', overview.activePlayers],
@@ -396,8 +454,22 @@ export function AdminFantasposi() {
         </form>
         <div className="admin-fantasposi__missions">{missions.map((mission) => {
           const supported = mission.missionType === 'action' || mission.missionType === 'social' || mission.missionType === 'photo';
+          const liveStatus = effectiveMissionStatus({
+            active: mission.active,
+            phaseStatus: mission.phaseStatus,
+            completed: false,
+            opensAt: mission.opensAt,
+            closesAt: mission.closesAt,
+          }, missionNow) as Mission['effectiveStatus'];
+          const liveTiming = mission.phaseStatus !== 'active'
+            ? 'Fase non attiva'
+            : liveStatus === 'scheduled'
+              ? `Si apre tra ${formatFantasposiCountdown(mission.opensAt, missionNow) ?? '—'}`
+              : liveStatus === 'available' && mission.closesAt
+                ? `Chiude tra ${formatFantasposiCountdown(mission.closesAt, missionNow) ?? '—'}`
+                : liveStatus === 'expired' ? 'Scaduta' : null;
           return <article key={mission.id}>
-            <div><span>{mission.phaseName} · {mission.missionType === 'photo' ? 'Photo' : mission.missionType}{supported ? '' : ' · non supportata'}</span><strong className={`admin-fantasposi__status is-${mission.effectiveStatus}`}>{missionStatusLabels[mission.effectiveStatus]}</strong></div>
+            <div><span>{mission.phaseName} · {mission.missionType === 'photo' ? 'Photo' : mission.missionType}{supported ? '' : ' · non supportata'}</span><strong className={`admin-fantasposi__status is-${liveStatus}`}>{missionStatusLabels[liveStatus]}</strong></div>
             <h3>{mission.title}</h3>
             {mission.description && <p>{mission.description}</p>}
             <dl className="admin-fantasposi__prediction-meta">
@@ -406,6 +478,7 @@ export function AdminFantasposi() {
               <div><dt>Completamenti</dt><dd>{mission.completionCount}</dd></div>
             </dl>
             <small>{mission.code} · {mission.points} punti · ordine {mission.sortOrder}</small>
+            {liveTiming && <small className="admin-fantasposi__countdown" aria-live="off">{liveTiming}</small>}
             <div><button type="button" disabled={busy || !supported} title={!supported ? 'Tipo non ancora supportato in V1' : 'Modifica dati e programmazione'} onClick={() => editMission(mission)}>Modifica</button><button type="button" disabled={busy || !supported} title={mission.active ? 'Nasconde la missione senza eliminarla' : 'Rende nuovamente attiva la missione'} onClick={() => void setMissionActive(mission, !mission.active)}>{mission.active ? 'Disattiva' : 'Riattiva'}</button><button className="admin-danger" type="button" disabled={busy || mission.completionCount > 0} title={mission.completionCount > 0 ? 'Non eliminabile: esistono completamenti associati' : 'Elimina definitivamente la missione'} onClick={() => void deleteMission(mission)}>Elimina</button></div>
           </article>;
         })}</div>

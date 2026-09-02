@@ -253,3 +253,35 @@ rimuovere proof non usate più vecchie di una soglia configurata.
 3. Ledger dei punti e classifica deterministica.
 4. Eventi live/Reatime e strumenti di moderazione.
 5. PWA installabile, notifiche e prove media.
+
+## Lifecycle finale del gioco
+
+`weddings.fantasposi_status` è la source of truth wedding-scoped e ammette
+`setup`, `active` e `finished`. Le API di lettura restano disponibili in tutti
+gli stati; completamenti, upload proof e risposte ai pronostici sono autorizzati
+solo in `active`. In `finished` la classifica finale continua a essere calcolata
+dai ledger: non esiste una seconda copia mutabile del punteggio. Il freeze è
+garantito dal blocco server-side di ogni mutation che possa assegnare punti.
+
+Start e finish sono transizioni condizionali sul wedding corrente. Il reset
+richiede la conferma esatta `RESET FANTASPOSI` e usa una singola istruzione SQL
+con CTE modificanti: elimina `fantasposi_player_missions` e
+`fantasposi_player_predictions` dello stesso wedding e riporta lo stato a
+`setup`. Giocatori, onboarding, team, fasi e cataloghi restano invariati. Anche
+stato e soluzione dei pronostici restano amministrati esplicitamente dal
+catalogo, senza reset impliciti distruttivi.
+
+Le proof R2 collegate ai completamenti rimossi non vengono cancellate nella
+transazione PostgreSQL: diventano orfane intenzionali da rimuovere con una
+manutenzione separata e idempotente. Questo evita una falsa transazione DB+R2.
+
+Player e admin usano lo stesso `effectiveMissionStatus` e lo stesso formatter
+di countdown. Il clock locale aggiorna soltanto la rappresentazione temporale;
+le mutation restano validate dal tempo PostgreSQL e dallo stato globale.
+
+La PWA ha start URL `/fantasposi` e service worker minimale. Sono cacheabili
+solo bundle statici, CSS, icone e manifest. Navigazioni, `/api/*`, auth,
+Supabase, URL firmati, upload e Realtime non sono mai messi in cache. Non esiste
+completion offline né background sync; offline viene mostrato un messaggio
+esplicito. La sessione Supabase resta nella persistenza browser già esistente e
+il routing OAuth/OTP non viene modificato.
