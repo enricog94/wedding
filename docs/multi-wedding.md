@@ -51,10 +51,14 @@ proxied appropriato. Conservare `wedding.eshome.it` e `workers.dev`.
 
 Aggiungere alle Redirect URLs consentite almeno:
 
+- `https://wedding.eshome.it/auth/callback`
 - `https://test.eshome.it/auth/callback`
 - `https://test.eshome.it/**` solo se la policy corrente usa wildcard analoghe
 
-OTP e OAuth continuano a usare `window.location.origin`. La sessione è salvata
+Supabase usa il Site URL quando un `redirect_to` non appartiene alla allowlist:
+per questo entrambi i callback espliciti sono necessari anche se il client usa
+correttamente `window.location.origin`. OTP e OAuth continuano a usare lo stesso
+origin di partenza. La sessione è salvata
 in `localStorage`, quindi è origin-specific: lo stesso utente effettua login
 separatamente sui due sottodomini. Nessuna service role raggiunge il browser.
 

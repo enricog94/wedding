@@ -229,10 +229,15 @@ export function normalizeAuthDestination(value: string | null | undefined, fallb
   return normalizedFallback;
 }
 
-export function startSupabaseOAuth(provider: 'google', nextPath: string): void {
+export function buildSupabaseCallbackUrl(origin: string, nextPath: string): string {
   const safeNext = normalizeAuthDestination(nextPath);
-  const callbackUrl = new URL('/auth/callback', window.location.origin);
+  const callbackUrl = new URL('/auth/callback', new URL(origin).origin);
   callbackUrl.searchParams.set('next', safeNext);
-  const parameters = new URLSearchParams({ provider, redirect_to: callbackUrl.toString() });
+  return callbackUrl.toString();
+}
+
+export function startSupabaseOAuth(provider: 'google', nextPath: string): void {
+  const callbackUrl = buildSupabaseCallbackUrl(window.location.origin, nextPath);
+  const parameters = new URLSearchParams({ provider, redirect_to: callbackUrl });
   window.location.assign(`${baseUrl()}/auth/v1/authorize?${parameters.toString()}`);
 }

@@ -8,6 +8,7 @@ import { SectionTitle } from '../components/SectionTitle';
 import { TimelineItem } from '../components/TimelineItem';
 import { ThemeDecoration } from '../components/ThemeDecoration';
 import { DEFAULT_WEDDING_CONTENT, getWeddingContent } from '../lib/config';
+import { weddingHeroImage } from '../lib/hero';
 import { applyWeddingTheme, getWeddingTheme } from '../lib/themes';
 import { AdminAuth } from './AdminAuth';
 import { AuthCallback } from './AuthCallback';
@@ -91,6 +92,7 @@ export function App() {
   );
   const theme = useMemo(() => getWeddingTheme(wedding.slug), [wedding.slug]);
   const date = weddingDateParts(wedding.weddingDate);
+  const heroImage = isContentResolved ? weddingHeroImage(wedding) : null;
   const firstPublicSection = showStory
     ? '#storia'
     : showSchedule
@@ -118,34 +120,37 @@ export function App() {
       />}
       {isAuthCallbackPage ? <AuthCallback /> : isFantasposiPage ? <FantasposiApp /> : isPhotoPage ? <PhotoPage theme={theme} /> : isGalleryPage ? <GalleryPage /> : isAdminPage ? <AdminAuth /> : <main>
         <div className="hero-viewport">
-          <section id="home" className="hero hero--photo" aria-labelledby="wedding-title">
-            {isContentResolved && (
+          <section
+            id="home"
+            className={`hero hero--photo${heroImage ? '' : ' hero--generic'}`}
+            aria-labelledby="wedding-title"
+            aria-busy={!isContentResolved}
+          >
+            {heroImage && (
               <img
                 className="hero-photo__image"
-                src={wedding.heroPhoto?.previewUrl ?? '/images/serena-enrico-editorial.jpg'}
-                alt={`${wedding.brideName} ed ${wedding.groomName} sorridono con i volti vicini tra gli alberi`}
-                width="2993"
-                height="1995"
+                src={heroImage.src}
+                alt={heroImage.alt}
                 decoding="async"
                 fetchPriority="high"
               />
             )}
             <div className="hero-photo__overlay" aria-hidden="true" />
-            <div className="hero__content hero-photo__content">
-              <p className="script-detail">{wedding.heroEyebrow || 'Ci sposiamo'}</p>
-              {wedding.heroTitle ? (
-                <h1 id="wedding-title" className="hero-photo__title hero-photo__title--custom">{wedding.heroTitle}</h1>
-              ) : (
-                <h1 id="wedding-title" className="hero-photo__title">
-                  <span className="hero-photo__name">{wedding.brideName}</span>
-                  <span className="hero-photo__ampersand">&amp;</span>
-                  <span className="hero-photo__name">{wedding.groomName}</span>
-                </h1>
-              )}
-              {wedding.heroSubtitle && <p className="hero__subtitle">{wedding.heroSubtitle}</p>}
-              <p className="hero__date">{date.day} <span>·</span> {date.month} <span>·</span> {date.year}</p>
-            </div>
-            {firstPublicSection && (
+            {isContentResolved && <div className="hero__content hero-photo__content">
+                <p className="script-detail">{wedding.heroEyebrow || 'Ci sposiamo'}</p>
+                {wedding.heroTitle ? (
+                  <h1 id="wedding-title" className="hero-photo__title hero-photo__title--custom">{wedding.heroTitle}</h1>
+                ) : (
+                  <h1 id="wedding-title" className="hero-photo__title">
+                    <span className="hero-photo__name">{wedding.brideName}</span>
+                    <span className="hero-photo__ampersand">&amp;</span>
+                    <span className="hero-photo__name">{wedding.groomName}</span>
+                  </h1>
+                )}
+                {wedding.heroSubtitle && <p className="hero__subtitle">{wedding.heroSubtitle}</p>}
+                <p className="hero__date">{date.day} <span>·</span> {date.month} <span>·</span> {date.year}</p>
+              </div>}
+            {isContentResolved && firstPublicSection && (
               <a className="scroll-cue" href={firstPublicSection}>
                 Scopri <span aria-hidden="true">↓</span>
               </a>

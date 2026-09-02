@@ -4788,6 +4788,13 @@ button.gallery-item:hover .gallery-item__image {
   max-width: 100%;
 }
 
+.hero--generic {
+  background:
+    radial-gradient(circle at 74% 24%, rgba(216, 197, 162, 0.16), transparent 28%),
+    radial-gradient(circle at 18% 76%, rgba(102, 112, 90, 0.18), transparent 32%),
+    var(--hero-espresso);
+}
+
 .hero-photo__image,
 .hero-photo__overlay {
   position: absolute;
