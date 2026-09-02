@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import {
   configureSupabase,
   getSupabaseAccessToken,
@@ -9,6 +9,10 @@ import {
   verifySupabaseOtp,
   type SupabasePublicConfig,
 } from '../lib/supabase';
+import {
+  effectiveMissionStatus as getEffectiveMissionStatus,
+  effectivePredictionStatus as getEffectivePredictionStatus,
+} from '../lib/fantasposi-domain';
 import {
   useFantasposiClock,
   useFantasposiRealtime,
@@ -65,6 +69,7 @@ type FantasyMission = {
   missionType: string;
   points: number;
   active: boolean;
+  sortOrder: number;
   opensAt: string | null;
   closesAt: string | null;
   effectiveStatus: 'inactive' | 'scheduled' | 'available' | 'expired' | 'completed';
@@ -116,30 +121,31 @@ type FantasyPrediction = {
 
 type PredictionsResponse = { predictions: FantasyPrediction[] };
 
-type EffectivePredictionStatus = 'scheduled' | 'open' | 'closed' | 'resolved';
-
-function effectivePredictionStatus(prediction: FantasyPrediction, now: number): EffectivePredictionStatus {
-  if (prediction.status === 'resolved') return 'resolved';
-  if (prediction.status === 'closed') return 'closed';
-  if (prediction.opensAt && now < Date.parse(prediction.opensAt)) return 'scheduled';
-  if (prediction.closesAt && now >= Date.parse(prediction.closesAt)) return 'closed';
-  return 'open';
+function effectivePredictionStatus(prediction: FantasyPrediction, now: number) {
+  return getEffectivePredictionStatus(prediction, now);
 }
 
 function formatPredictionTime(value: string | null): string | null {
   if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
   return new Intl.DateTimeFormat('it-IT', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function fantasposiCountdown(target: string | null, now: number): string | null {
   if (!target) return null;
-  const seconds = Math.max(0, Math.ceil((Date.parse(target) - now) / 1_000));
+  const targetTime = Date.parse(target);
+  if (Number.isNaN(targetTime)) return null;
+  const seconds = Math.max(0, Math.ceil((targetTime - now) / 1_000));
   const hours = Math.floor(seconds / 3_600);
+  const days = Math.floor(hours / 24);
   const minutes = Math.floor((seconds % 3_600) / 60);
   const remainingSeconds = seconds % 60;
-  return hours > 0
+  return days > 0
+    ? `${days}g ${hours % 24}h`
+    : hours > 0
     ? `${hours}h ${String(minutes).padStart(2, '0')}m`
     : `${minutes}m ${String(remainingSeconds).padStart(2, '0')}s`;
 }
@@ -148,11 +154,13 @@ function effectiveMissionStatus(
   mission: FantasyMission,
   now: number,
 ): FantasyMission['effectiveStatus'] {
-  if (mission.completed) return 'completed';
-  if (!mission.active || mission.phase.status !== 'active') return 'inactive';
-  if (mission.opensAt && now < Date.parse(mission.opensAt)) return 'scheduled';
-  if (mission.closesAt && now >= Date.parse(mission.closesAt)) return 'expired';
-  return 'available';
+  return getEffectiveMissionStatus({
+    active: mission.active,
+    phaseStatus: mission.phase.status,
+    completed: mission.completed,
+    opensAt: mission.opensAt,
+    closesAt: mission.closesAt,
+  }, now);
 }
 
 type MissionsResponse = {
@@ -207,6 +215,35 @@ async function fantasyFetch(input: string, init: RequestInit = {}): Promise<Resp
 async function responseError(response: Response): Promise<string> {
   const payload = await response.json().catch(() => null) as { error?: string } | null;
   return payload?.error ?? `HTTP ${response.status}`;
+}
+
+const PHOTO_PROOF_TYPE_LIST = [
+  'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+] as const;
+const PHOTO_PROOF_TYPES = new Set<string>(PHOTO_PROOF_TYPE_LIST);
+const PHOTO_PROOF_ACCEPT = PHOTO_PROOF_TYPE_LIST.join(',');
+const PHOTO_PROOF_MAX_SIZE = 20 * 1024 * 1024;
+
+function putPhotoProof(
+  uploadUrl: string,
+  file: File,
+  onProgress: (progress: number) => void,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const upload = new XMLHttpRequest();
+    upload.open('PUT', uploadUrl);
+    upload.setRequestHeader('Content-Type', file.type);
+    upload.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+    upload.onload = () => {
+      if (upload.status >= 200 && upload.status < 300) resolve();
+      else reject(new Error('Caricamento della foto non riuscito.'));
+    };
+    upload.onerror = () => reject(new Error('Caricamento della foto non riuscito.'));
+    upload.onabort = () => reject(new Error('Caricamento della foto annullato.'));
+    upload.send(file);
+  });
 }
 
 function FantasyLogin({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
@@ -377,7 +414,20 @@ function FantasyMissions({
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [proofs, setProofs] = useState<Record<number, {
+    previewUrl?: string;
+    progress: number | null;
+    status: 'uploading' | 'completing' | 'completed' | 'error';
+    message: string;
+  }>>({});
+  const proofUrls = useRef<Map<number, string>>(new Map());
+  const busyIdRef = useRef<number | null>(null);
   const now = useFantasposiClock(true);
+
+  useEffect(() => () => {
+    for (const url of proofUrls.current.values()) URL.revokeObjectURL(url);
+    proofUrls.current.clear();
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -386,14 +436,43 @@ function FantasyMissions({
         if (!response.ok) throw new Error(await responseError(response));
         return response.json() as Promise<MissionsResponse>;
       })
-      .then((result) => { if (mounted) setData(result); })
+      .then((result) => {
+        if (mounted) {
+          setData(result);
+          setError('');
+        }
+      })
       .catch((loadError: unknown) => { if (mounted) setError(loadError instanceof Error ? loadError.message : 'Missioni non disponibili.'); })
       .finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
   }, [refreshKey]);
 
+  const applyCompletion = (mission: FantasyMission, result: {
+    mission: FantasyMission;
+    pointsAwarded: number;
+    totalPoints: number;
+  }) => {
+    setData((current) => current ? {
+      ...current,
+      totalPoints: result.totalPoints,
+      completedMissionCount: current.completedMissionCount + (mission.completed ? 0 : 1),
+      availableMissionCount: Math.max(0, current.availableMissionCount - (mission.completed ? 0 : 1)),
+      phases: current.phases.map((group) => ({
+        ...group,
+        missions: group.missions.map((item) => item.id === mission.id ? result.mission : item),
+      })),
+    } : current);
+    onSummaryChange({
+      totalPoints: result.totalPoints,
+      completedDelta: mission.completed ? 0 : 1,
+      availableDelta: mission.completed ? 0 : -1,
+      missionId: mission.id,
+    });
+  };
+
   const complete = async (mission: FantasyMission) => {
-    if (effectiveMissionStatus(mission, now) !== 'available' || busyId !== null) return;
+    if (effectiveMissionStatus(mission, now) !== 'available' || busyIdRef.current !== null) return;
+    busyIdRef.current = mission.id;
     setBusyId(mission.id); setError('');
     try {
       const response = await fantasyFetch(`/api/fantasposi/missions/${mission.id}/complete`, { method: 'POST' });
@@ -403,36 +482,123 @@ function FantasyMissions({
         pointsAwarded: number;
         totalPoints: number;
       };
-      setData((current) => current ? {
-        ...current,
-        totalPoints: result.totalPoints,
-        completedMissionCount: current.completedMissionCount + (mission.completed ? 0 : 1),
-        availableMissionCount: Math.max(0, current.availableMissionCount - (mission.completed ? 0 : 1)),
-        phases: current.phases.map((group) => ({
-          ...group,
-          missions: group.missions.map((item) => item.id === mission.id ? result.mission : item),
-        })),
-      } : current);
-      onSummaryChange({
-        totalPoints: result.totalPoints,
-        completedDelta: mission.completed ? 0 : 1,
-        availableDelta: mission.completed ? 0 : -1,
-        missionId: mission.id,
-      });
+      applyCompletion(mission, result);
     } catch (completeError) {
       setError(completeError instanceof Error ? completeError.message : 'Completamento non riuscito.');
     } finally {
+      busyIdRef.current = null;
       setBusyId(null);
     }
   };
 
+  const uploadPhotoProof = async (mission: FantasyMission, file: File) => {
+    if (effectiveMissionStatus(mission, now) !== 'available' || busyIdRef.current !== null) return;
+    const previousUrl = proofUrls.current.get(mission.id);
+    if (!PHOTO_PROOF_TYPES.has(file.type)) {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      proofUrls.current.delete(mission.id);
+      setProofs((current) => ({
+        ...current,
+        [mission.id]: { progress: null, status: 'error', message: 'Seleziona una foto JPEG, PNG, WebP, HEIC o HEIF.' },
+      }));
+      return;
+    }
+    if (file.size <= 0 || file.size > PHOTO_PROOF_MAX_SIZE) {
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
+      proofUrls.current.delete(mission.id);
+      setProofs((current) => ({
+        ...current,
+        [mission.id]: { progress: null, status: 'error', message: 'La foto deve essere inferiore a 20 MB.' },
+      }));
+      return;
+    }
+
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    const previewUrl = URL.createObjectURL(file);
+    proofUrls.current.set(mission.id, previewUrl);
+    busyIdRef.current = mission.id;
+    setBusyId(mission.id); setError('');
+    setProofs((current) => ({
+      ...current,
+      [mission.id]: { previewUrl, progress: 0, status: 'uploading', message: 'Caricamento foto…' },
+    }));
+    try {
+      const createResponse = await fantasyFetch(`/api/fantasposi/missions/${mission.id}/proof/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, size: file.size }),
+      });
+      if (!createResponse.ok) throw new Error(await responseError(createResponse));
+      const upload = await createResponse.json() as { mediaId: number; uploadUrl: string; method: string };
+      if (!Number.isSafeInteger(upload.mediaId) || !upload.uploadUrl || upload.method !== 'PUT') {
+        throw new Error('Upload proof non valido.');
+      }
+      await putPhotoProof(upload.uploadUrl, file, (progress) => {
+        setProofs((current) => ({
+          ...current,
+          [mission.id]: { previewUrl, progress, status: 'uploading', message: `Caricamento ${progress}%` },
+        }));
+      });
+      setProofs((current) => ({
+        ...current,
+        [mission.id]: { previewUrl, progress: 100, status: 'completing', message: 'Registrazione della prova…' },
+      }));
+      const proofResponse = await fantasyFetch(
+        `/api/fantasposi/missions/${mission.id}/proof/${upload.mediaId}/complete`,
+        { method: 'POST' },
+      );
+      if (!proofResponse.ok) throw new Error(await responseError(proofResponse));
+
+      const completionResponse = await fantasyFetch(
+        `/api/fantasposi/missions/${mission.id}/complete`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mediaId: upload.mediaId }),
+        },
+      );
+      if (!completionResponse.ok) throw new Error(await responseError(completionResponse));
+      const result = await completionResponse.json() as {
+        mission: FantasyMission;
+        pointsAwarded: number;
+        totalPoints: number;
+      };
+      applyCompletion(mission, result);
+      setProofs((current) => ({
+        ...current,
+        [mission.id]: {
+          previewUrl, progress: 100, status: 'completed',
+          message: `✓ Missione completata · +${result.pointsAwarded} punti`,
+        },
+      }));
+    } catch (uploadError) {
+      setProofs((current) => ({
+        ...current,
+        [mission.id]: {
+          previewUrl, progress: null, status: 'error',
+          message: uploadError instanceof Error ? uploadError.message : 'Caricamento della prova non riuscito.',
+        },
+      }));
+    } finally {
+      busyIdRef.current = null;
+      setBusyId(null);
+    }
+  };
+
+  const selectPhotoProof = (mission: FantasyMission, event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void uploadPhotoProof(mission, file);
+  };
+
   if (loading) return <section className="fantasposi-placeholder"><p>Caricamento missioni…</p></section>;
+  const missionCount = data?.phases.reduce((total, group) => total + group.missions.length, 0) ?? 0;
   return (
     <section className="fantasposi-missions">
       <p className="fantasposi-kicker">Fase attuale</p>
       <h1>{data?.phases[0]?.phase.name ?? 'In preparazione'}</h1>
       {error && <p className="fantasposi-error" role="alert">{error}</p>}
-      {!data?.phases.length && <div className="fantasposi-missions__empty"><span aria-hidden="true">✦</span><p>Le missioni saranno disponibili quando inizierà la prossima fase.</p></div>}
+      {missionCount === 0 && <div className="fantasposi-missions__empty"><span aria-hidden="true">✦</span><p>Le missioni saranno disponibili quando inizierà la prossima fase.</p></div>}
       <div className="fantasposi-mission-list">
         {data?.phases.flatMap((group) => group.missions).map((mission) => {
           const effectiveStatus = effectiveMissionStatus(mission, now);
@@ -443,16 +609,31 @@ function FantasyMissions({
               : effectiveStatus === 'expired' ? 'Tempo scaduto' : null;
           return (
           <article className={`fantasposi-mission is-${effectiveStatus}`} key={mission.id}>
-            <div><p>{mission.missionType === 'social' ? 'Missione social' : 'Missione action'}</p><strong>+{mission.points} punti</strong></div>
+            <div><p>{mission.missionType === 'photo' ? 'Missione foto' : mission.missionType === 'social' ? 'Missione social' : 'Missione action'}</p><strong>+{mission.points} punti</strong></div>
             <h2>{mission.title}</h2>
             {mission.description && <p>{mission.description}</p>}
             {timing && <p className="fantasposi-mission__timing">{timing}</p>}
-            <button type="button" disabled={effectiveStatus !== 'available' || busyId !== null} onClick={() => void complete(mission)}>
-              {effectiveStatus === 'completed' ? '✓ Completata'
-                : effectiveStatus === 'scheduled' ? 'Non ancora disponibile'
-                  : effectiveStatus === 'expired' ? 'Missione scaduta'
-                    : busyId === mission.id ? 'Completamento…' : 'Missione completata'}
-            </button>
+            {mission.missionType === 'photo' && effectiveStatus === 'available' ? (
+              <label className={`fantasposi-mission__photo-button${busyId !== null ? ' is-disabled' : ''}`}>
+                {busyId === mission.id ? 'Caricamento…' : 'Scatta o carica una foto'}
+                <input type="file" accept={PHOTO_PROOF_ACCEPT} disabled={busyId !== null} onChange={(event) => selectPhotoProof(mission, event)} />
+              </label>
+            ) : (
+              <button type="button" disabled={effectiveStatus !== 'available' || busyId !== null} onClick={() => void complete(mission)}>
+                {effectiveStatus === 'completed' ? '✓ Completata'
+                  : effectiveStatus === 'scheduled' ? 'Non ancora disponibile'
+                    : effectiveStatus === 'expired' ? 'Missione scaduta'
+                      : busyId === mission.id ? 'Completamento…' : 'Missione completata'}
+              </button>
+            )}
+            {proofs[mission.id] && (
+              <div className={`fantasposi-mission__proof is-${proofs[mission.id].status}${proofs[mission.id].previewUrl ? ' has-preview' : ''}`} aria-live="polite">
+                {proofs[mission.id].previewUrl && <img src={proofs[mission.id].previewUrl} alt="Anteprima della prova selezionata" />}
+                <span>{proofs[mission.id].message}</span>
+                {proofs[mission.id].status === 'uploading' && proofs[mission.id].progress !== null
+                  && <progress aria-label="Avanzamento caricamento foto" max="100" value={proofs[mission.id].progress ?? 0} />}
+              </div>
+            )}
             {mission.completed && <small>+{mission.pointsAwarded ?? mission.points} punti conquistati</small>}
           </article>
           );
@@ -633,12 +814,30 @@ function FantasyPredictions({ refreshKey }: { refreshKey: number }) {
   </section>;
 }
 
+function FantasyHowToPlay({ onBack }: { onBack: () => void }) {
+  const steps = [
+    ['01', 'Scegli il team', 'Entra nel Team sposa o nel Team sposo.'],
+    ['02', 'Completa le missioni', 'Segui le sfide disponibili nella fase corrente.'],
+    ['03', 'Fai i pronostici', 'Scegli la risposta prima della chiusura.'],
+    ['04', 'Accumula punti', 'Ogni missione o pronostico assegna punti una sola volta.'],
+    ['05', 'Segui la classifica', 'Controlla la tua posizione e il risultato delle squadre.'],
+  ];
+  return <section className="fantasposi-how-to">
+    <p className="fantasposi-kicker">Regole essenziali</p>
+    <h1>Come si gioca</h1>
+    <p>Il gioco accompagna le diverse fasi dell’evento: alcune sfide sono live e a tempo, altre richiedono una foto come prova.</p>
+    <ol>{steps.map(([number, title, description]) => <li key={number}><span>{number}</span><div><strong>{title}</strong><p>{description}</p></div></li>)}</ol>
+    <button className="fantasposi-secondary" type="button" onClick={onBack}>Torna al profilo</button>
+  </section>;
+}
+
 function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLogout: () => Promise<void> }) {
   const [path, setPath] = useState(window.location.pathname.replace(/\/$/, '') || '/fantasposi');
   const [game, setGame] = useState(bootstrap);
   const [missionsRefreshKey, setMissionsRefreshKey] = useState(0);
   const [predictionsRefreshKey, setPredictionsRefreshKey] = useState(0);
   const [leaderboardRefreshKey, setLeaderboardRefreshKey] = useState(0);
+  const bootstrapRequestRef = useRef<Promise<void> | null>(null);
   const homeNow = useFantasposiClock(path === '/fantasposi');
   useEffect(() => {
     const update = () => setPath(window.location.pathname.replace(/\/$/, '') || '/fantasposi');
@@ -650,13 +849,20 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
     setPath(nextPath);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const refreshBootstrap = useCallback(async () => {
-    try {
-      const response = await fantasyFetch('/api/fantasposi/bootstrap');
-      if (response.ok) setGame(await response.json() as BootstrapResponse);
-    } catch {
-      // REST polling/focus recovery is best effort; route-level errors remain local.
-    }
+  const refreshBootstrap = useCallback(() => {
+    if (bootstrapRequestRef.current) return bootstrapRequestRef.current;
+    const request = (async () => {
+      try {
+        const response = await fantasyFetch('/api/fantasposi/bootstrap');
+        if (response.ok) setGame(await response.json() as BootstrapResponse);
+      } catch {
+        // REST polling/focus recovery is best effort; route-level errors remain local.
+      }
+    })().finally(() => {
+      if (bootstrapRequestRef.current === request) bootstrapRequestRef.current = null;
+    });
+    bootstrapRequestRef.current = request;
+    return request;
   }, []);
   const invalidate = useCallback((scope: FantasposiInvalidation) => {
     if (scope === 'all' || scope === 'phases' || scope === 'missions') {
@@ -683,9 +889,21 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   }, [path, refreshBootstrap]);
   const teamName = game.wedding.teams[game.player.team];
   const displayName = game.player.displayName || 'Giocatore';
-  const availableHomeMissions = game.recommendedMissions
-    .filter((mission) => effectiveMissionStatus(mission, homeNow) === 'available');
-  const homeMissions = availableHomeMissions.slice(0, 3);
+  const homeMissions = game.recommendedMissions
+    .filter((mission) => {
+      const status = effectiveMissionStatus(mission, homeNow);
+      return status === 'available' || status === 'scheduled';
+    })
+    .sort((left, right) => {
+      const leftStatus = effectiveMissionStatus(left, homeNow);
+      const rightStatus = effectiveMissionStatus(right, homeNow);
+      if (leftStatus !== rightStatus) return leftStatus === 'available' ? -1 : 1;
+      if (leftStatus === 'scheduled') {
+        return (left.opensAt ?? '').localeCompare(right.opensAt ?? '');
+      }
+      return left.sortOrder - right.sortOrder;
+    })
+    .slice(0, 4);
 
   let content;
   if (path === '/fantasposi/missioni') {
@@ -700,10 +918,12 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
     content = <FantasyPredictions refreshKey={predictionsRefreshKey} />;
   } else if (path === '/fantasposi/classifica') {
     content = <FantasyLeaderboard refreshKey={leaderboardRefreshKey} />;
+  } else if (path === '/fantasposi/come-si-gioca') {
+    content = <FantasyHowToPlay onBack={() => navigate('/fantasposi/profilo')} />;
   } else if (path === '/fantasposi/profilo') {
-    content = <section className="fantasposi-profile"><p className="fantasposi-kicker">Il tuo profilo</p><div className="fantasposi-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</div><h1>{displayName}</h1><p>{teamName}</p><button className="fantasposi-secondary" type="button" onClick={() => void onLogout()}>Esci</button></section>;
+    content = <section className="fantasposi-profile"><p className="fantasposi-kicker">Il tuo profilo</p><div className="fantasposi-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</div><h1>{displayName}</h1><p>{teamName}</p><button className="fantasposi-primary" type="button" onClick={() => navigate('/fantasposi/come-si-gioca')}>Come si gioca</button><button className="fantasposi-secondary" type="button" onClick={() => void onLogout()}>Esci</button></section>;
   } else {
-    content = <section className="fantasposi-home"><p className="fantasposi-kicker">FantaSposi · {game.wedding.brideName} &amp; {game.wedding.groomName}</p><h1>Ciao, {displayName}!</h1><div className="fantasposi-home__meta"><span>{teamName}</span><span>Fase: {game.currentPhase?.name ?? 'In preparazione'}</span></div><div className="fantasposi-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong></div><div className="fantasposi-home__counts"><div><strong>{availableHomeMissions.length}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Completate</span></div></div><section className="fantasposi-now"><div><p className="fantasposi-kicker">Missioni da fare adesso</p><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></div>{homeMissions.length > 0 ? homeMissions.map((mission) => <button type="button" key={mission.id} onClick={() => navigate('/fantasposi/missioni')}><span>+{mission.points}</span><strong>{mission.title}</strong></button>) : <p>Nessuna missione disponibile in questo momento.</p>}</section><section className="fantasposi-home__predictions"><div><p className="fantasposi-kicker">Pronostici aperti</p><strong>{game.openPredictionCount}</strong></div>{game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points}</span>{prediction.question}</button>)}<button type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button></section></section>;
+    content = <section className="fantasposi-home"><p className="fantasposi-kicker">FantaSposi · {game.wedding.brideName} &amp; {game.wedding.groomName}</p><h1>Ciao, {displayName}!</h1><div className="fantasposi-home__meta"><span>{teamName}</span><span>Fase: {game.currentPhase?.name ?? 'In preparazione'}</span></div><div className="fantasposi-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong></div><div className="fantasposi-home__counts"><div><strong>{game.availableMissionCount}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Completate</span></div></div><section className="fantasposi-now"><div><p className="fantasposi-kicker">Missioni da fare adesso</p><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></div>{homeMissions.length > 0 ? homeMissions.map((mission) => { const status = effectiveMissionStatus(mission, homeNow); return <button type="button" key={mission.id} onClick={() => navigate('/fantasposi/missioni')}><span>{status === 'scheduled' ? `Tra ${fantasposiCountdown(mission.opensAt, homeNow) ?? 'poco'}` : `+${mission.points}`}</span><strong>{mission.title}</strong></button>; }) : <p>Nessuna missione disponibile in questo momento.</p>}</section><section className="fantasposi-home__predictions"><div><p className="fantasposi-kicker">Pronostici aperti</p><strong>{game.openPredictionCount}</strong></div>{game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points}</span>{prediction.question}</button>)}<button type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button></section></section>;
   }
 
   return (

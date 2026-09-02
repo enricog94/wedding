@@ -46,7 +46,8 @@
 .fantasposi-entry__panel h2,
 .fantasposi-home h1,
 .fantasposi-placeholder h1,
-.fantasposi-profile h1 {
+.fantasposi-profile h1,
+.fantasposi-how-to h1 {
   margin: 0.35rem 0 1rem;
   font: 600 clamp(2.5rem, 13vw, 4.5rem)/0.92 var(--font-display);
   letter-spacing: -0.025em;
@@ -422,7 +423,65 @@
 
 .fantasposi-profile .fantasposi-secondary {
   width: auto;
-  margin-top: 2rem;
+  margin-top: 0.75rem;
+}
+
+.fantasposi-profile .fantasposi-primary {
+  width: min(100%, 18rem);
+  margin-top: 1.5rem;
+}
+
+.fantasposi-how-to {
+  width: min(100%, 42rem);
+  margin: 0 auto;
+}
+
+.fantasposi-how-to > p:not(.fantasposi-kicker) {
+  max-width: 38rem;
+  color: var(--color-muted);
+  line-height: 1.75;
+}
+
+.fantasposi-how-to ol {
+  display: grid;
+  gap: 0;
+  margin: 2.25rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fantasposi-how-to li {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 1rem;
+  border-bottom: 1px solid var(--color-border);
+  padding: 1.15rem 0;
+}
+
+.fantasposi-how-to li:first-child {
+  border-top: 1px solid var(--color-border);
+}
+
+.fantasposi-how-to li > span {
+  padding-top: 0.2rem;
+  color: var(--color-accent);
+  font: 600 0.72rem/1 var(--font-body);
+  letter-spacing: 0.08em;
+}
+
+.fantasposi-how-to li strong {
+  font: 600 1.5rem/1.1 var(--font-display);
+}
+
+.fantasposi-how-to li p {
+  margin: 0.35rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.fantasposi-how-to .fantasposi-secondary {
+  width: auto;
 }
 
 .fantasposi-bottom-nav {
@@ -3346,7 +3405,10 @@ button.gallery-item:hover .gallery-item__image {
   text-transform: uppercase;
 }
 
-.fantasposi-mission > button {
+.fantasposi-mission > button,
+.fantasposi-mission__photo-button {
+  display: grid;
+  place-items: center;
   width: 100%;
   min-height: 3rem;
   border: 1px solid var(--color-primary);
@@ -3357,6 +3419,66 @@ button.gallery-item:hover .gallery-item__image {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
+}
+
+.fantasposi-mission__photo-button {
+  position: relative;
+}
+
+.fantasposi-mission__photo-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fantasposi-mission__photo-button:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+
+.fantasposi-mission__photo-button.is-disabled {
+  opacity: 0.58;
+  cursor: wait;
+}
+
+.fantasposi-mission .fantasposi-mission__proof {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.fantasposi-mission .fantasposi-mission__proof.has-preview {
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+}
+
+.fantasposi-mission__proof img {
+  width: 4.5rem;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+}
+
+.fantasposi-mission__proof progress {
+  width: 100%;
+  height: 0.35rem;
+  grid-column: 1 / -1;
+  accent-color: var(--color-primary);
+}
+
+.fantasposi-mission__proof.is-completed span {
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.fantasposi-mission__proof.is-error span {
+  color: #8a3f35;
 }
 
 .fantasposi-mission.is-completed {
@@ -3684,6 +3806,75 @@ button.gallery-item:hover .gallery-item__image {
 
 .admin-fantasposi__mission-form {
   margin-bottom: 1.5rem;
+}
+
+.admin-fantasposi__form-section {
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid var(--color-line);
+  padding: 0.9rem;
+}
+
+.admin-fantasposi__form-section legend {
+  padding-inline: 0.35rem;
+  color: var(--color-charcoal);
+  font: 600 1.1rem/1 var(--font-display);
+}
+
+.admin-fantasposi__form-section legend span {
+  color: var(--color-muted);
+  font: 700 0.58rem/1 var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-fantasposi__form-section > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-fantasposi__form-section > div label {
+  flex: 1 1 8rem;
+}
+
+.admin-fantasposi__form-section > p,
+.admin-fantasposi__optional-time > p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.admin-fantasposi__optional-time {
+  border: 1px solid var(--color-line);
+  padding: 0.8rem;
+}
+
+.admin-fantasposi__status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  border: 1px solid var(--color-line);
+  padding: 0.25rem 0.5rem;
+  color: var(--color-muted);
+  background: var(--color-background);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-fantasposi__status.is-available,
+.admin-fantasposi__status.is-open,
+.admin-fantasposi__status.is-resolved {
+  color: var(--color-olive);
+  border-color: var(--color-sage);
+}
+
+.admin-fantasposi__status.is-expired,
+.admin-fantasposi__status.is-closed {
+  color: #76544d;
 }
 
 .admin-fantasposi__mission-form h3,

@@ -1,10 +1,30 @@
 import type { Database } from '../lib/supabase-db';
+import {
+  isPhotoProofOriginalKey,
+  missionRequiresPhotoProof,
+  parsePhotoProofCreateInput,
+  parsePhotoProofMediaId,
+  parsePositiveInteger,
+  photoProofPrefix,
+  selectHomeMissionRecommendations,
+} from '../lib/fantasposi-domain';
+import {
+  FANTASPOSI_PROOF_SOURCE,
+  MEDIA_TYPES,
+  isSupportedImageMimeType,
+} from '../lib/media-types';
 
 type FantasposiEnv = {
   DB: Database;
   CURRENT_WEDDING_SLUG: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
+  MEDIA_BUCKET: R2Bucket;
+};
+
+type FantasposiMediaServices = {
+  createPresignedPutUrl: (objectKey: string) => Promise<string>;
+  enqueueMediaPreview: (mediaId: number) => Promise<void>;
 };
 
 type AuthenticatedUser = {
@@ -78,6 +98,30 @@ type CompletionRow = {
   status: string;
   completed_at: string;
   points_awarded: number;
+  media_id: number | null;
+};
+
+type PhotoMissionRow = {
+  id: number;
+  code: string;
+  active: boolean;
+  opens_at: string | null;
+  closes_at: string | null;
+  phase_status: 'locked' | 'active' | 'completed';
+  effective_status: 'scheduled' | 'available' | 'expired';
+};
+
+type ProofMediaRow = {
+  id: number;
+  wedding_id: number;
+  uploader_user_id: string | null;
+  source: string;
+  original_key: string;
+  mime_type: string;
+  size_bytes: number;
+  status: string;
+  preview_status: string;
+  uploaded_at: string | null;
 };
 
 type LeaderboardRow = {
@@ -281,7 +325,7 @@ async function missionsForPlayer(
       AND completion.status = 'completed'
      WHERE mission.wedding_id = ?
        AND mission.active = true
-       AND mission.mission_type IN ('action', 'social')
+       AND mission.mission_type IN ('action', 'social', 'photo')
        AND phase.status = 'active'
      ORDER BY phase.sort_order, phase.id, mission.sort_order, mission.id`,
   ).bind(playerId, weddingId).all<MissionRow>();
@@ -314,7 +358,7 @@ async function gameSummary(
         AND completion.wedding_id = mission.wedding_id
         AND completion.status = 'completed'
        WHERE mission.wedding_id = ?
-         AND mission.mission_type IN ('action', 'social')
+         AND mission.mission_type IN ('action', 'social', 'photo')
      ), prediction_summary AS (
        SELECT COALESCE(SUM(points_awarded)
                 FILTER (WHERE status = 'scored'), 0)::integer AS prediction_points
@@ -424,9 +468,17 @@ async function answerPredictionResponse(
   if (!resolved.ok) return resolved.response;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
-  const body = await request.json() as Record<string, unknown>;
-  const optionId = Number(body.optionId);
-  if (!Number.isSafeInteger(optionId) || optionId <= 0) return json({ error: 'Invalid option ID' }, 400);
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return json({ error: 'JSON body must be an object' }, 400);
+  }
+  const optionId = parsePositiveInteger((input as Record<string, unknown>).optionId);
+  if (optionId === null) return json({ error: 'Invalid option ID' }, 400);
 
   const answer = await env.DB.prepare(
     `WITH target AS MATERIALIZED (
@@ -538,11 +590,19 @@ async function bootstrapResponse(request: Request, env: FantasposiEnv): Promise<
   const currentPhase = phases.results.find((phase) => phase.status === 'active') ?? null;
   const summary = await gameSummary(env, resolved.wedding.id, serializedPlayer.id);
   const currentMissions = await missionsForPlayer(env, resolved.wedding.id, serializedPlayer.id);
-  // Keep scheduled missions in the bootstrap so the local clock can make them
-  // available without a network request when their opening time is reached.
-  const recommendedMissions = currentMissions.filter((mission) => (
-    !mission.completed_at && mission.effective_status !== 'expired'
-  ));
+  const recommendedMissions = selectHomeMissionRecommendations(
+    currentMissions.map((mission) => ({
+      id: mission.id,
+      sortOrder: mission.sort_order,
+      active: mission.active,
+      phaseStatus: mission.phase_status,
+      completed: Boolean(mission.completed_at),
+      opensAt: mission.opens_at,
+      closesAt: mission.closes_at,
+      mission,
+    })),
+    Date.now(),
+  ).map((candidate) => candidate.mission);
   const predictions = serializePredictions(await predictionRows(env, resolved.wedding.id, serializedPlayer.id));
   const openPredictions = predictions.filter((prediction) => prediction.canAnswer);
   const teamScores = await env.DB.prepare(
@@ -714,6 +774,298 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
   });
 }
 
+async function photoMissionState(
+  env: FantasposiEnv,
+  weddingId: number,
+  missionId: number,
+): Promise<PhotoMissionRow | null> {
+  return env.DB.prepare(
+    `SELECT mission.id, mission.code, mission.active, mission.opens_at, mission.closes_at,
+            phase.status AS phase_status,
+            CASE
+              WHEN mission.opens_at IS NOT NULL AND CURRENT_TIMESTAMP < mission.opens_at THEN 'scheduled'
+              WHEN mission.closes_at IS NOT NULL AND CURRENT_TIMESTAMP >= mission.closes_at THEN 'expired'
+              ELSE 'available'
+            END AS effective_status
+     FROM fantasposi_missions mission
+     INNER JOIN fantasposi_phases phase
+       ON phase.id = mission.phase_id AND phase.wedding_id = mission.wedding_id
+     WHERE mission.id = ? AND mission.wedding_id = ? AND mission.mission_type = 'photo'
+     LIMIT 1`,
+  ).bind(missionId, weddingId).first<PhotoMissionRow>();
+}
+
+function unavailablePhotoMissionResponse(mission: PhotoMissionRow | null): Response | null {
+  if (!mission) return json({ error: 'Photo mission not found' }, 404);
+  if (mission.effective_status === 'scheduled') {
+    return json({ error: 'La missione non è ancora disponibile.', code: 'mission_scheduled' }, 409);
+  }
+  if (mission.effective_status === 'expired') {
+    return json({ error: 'Il tempo per questa missione è scaduto.', code: 'mission_expired' }, 409);
+  }
+  if (!mission.active || mission.phase_status !== 'active') {
+    return json({ error: 'Mission is not currently available' }, 409);
+  }
+  return null;
+}
+
+async function createPhotoProofResponse(
+  request: Request,
+  env: FantasposiEnv,
+  services: FantasposiMediaServices,
+  missionId: number,
+): Promise<Response> {
+  const resolved = await context(request, env);
+  if (!resolved.ok) return resolved.response;
+  const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
+  if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  const mission = await photoMissionState(env, resolved.wedding.id, missionId);
+  const unavailable = unavailablePhotoMissionResponse(mission);
+  if (unavailable || !mission) return unavailable ?? json({ error: 'Photo mission not found' }, 404);
+
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+  const parsed = parsePhotoProofCreateInput(input);
+  if (!parsed.value) {
+    const errors = {
+      payload: 'JSON body must be an object',
+      filename: 'Filename is required',
+      mimeType: 'A supported image is required',
+      size: 'Size must be a positive integer',
+      maxSize: 'Image exceeds the allowed size',
+    } as const;
+    return json({ error: errors[parsed.invalidField] }, 400);
+  }
+  const { filename, mimeType, size } = parsed.value;
+  const mediaType = MEDIA_TYPES[mimeType];
+
+  const uuid = crypto.randomUUID();
+  const originalKey = `${photoProofPrefix(resolved.wedding.slug, mission.code)}${uuid}.${mediaType.extension}`;
+  const uploadUrl = await services.createPresignedPutUrl(originalKey);
+  const created = await env.DB.prepare(
+    `INSERT INTO media (
+       uuid, wedding_id, uploader_user_id, source, original_filename, original_key,
+       mime_type, size_bytes, status, preview_status
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'uploading', 'pending')
+     RETURNING id`,
+  ).bind(
+    uuid, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
+    filename, originalKey, mimeType, size,
+  ).first<{ id: number }>();
+  if (!created) throw new Error('PostgreSQL did not create the photo proof media');
+
+  return json({
+    mediaId: created.id,
+    uuid,
+    originalKey,
+    uploadUrl,
+    method: 'PUT',
+  }, 201);
+}
+
+async function completePhotoProofUploadResponse(
+  request: Request,
+  env: FantasposiEnv,
+  services: FantasposiMediaServices,
+  missionId: number,
+  mediaId: number,
+): Promise<Response> {
+  const resolved = await context(request, env);
+  if (!resolved.ok) return resolved.response;
+  const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
+  if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  const mission = await photoMissionState(env, resolved.wedding.id, missionId);
+  if (!mission) return json({ error: 'Photo mission not found' }, 404);
+  const media = await env.DB.prepare(
+    `SELECT id, wedding_id, uploader_user_id, source, original_key, mime_type,
+            size_bytes, status, preview_status, uploaded_at
+     FROM media
+     WHERE id = ? AND wedding_id = ? AND uploader_user_id = ? AND source = ?
+     LIMIT 1`,
+  ).bind(
+    mediaId, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
+  ).first<ProofMediaRow>();
+  if (!media
+    || !isPhotoProofOriginalKey(media.original_key, resolved.wedding.slug, mission.code)
+    || !isSupportedImageMimeType(media.mime_type)) {
+    return json({ error: 'Photo proof not found' }, 404);
+  }
+
+  const object = await env.MEDIA_BUCKET.head(media.original_key);
+  if (!object) return json({ error: 'Uploaded photo not found' }, 409);
+  if (object.size !== media.size_bytes) return json({ error: 'Uploaded photo size does not match' }, 409);
+
+  if (media.status === 'uploading') {
+    const update = await env.DB.prepare(
+      `UPDATE media
+       SET status = 'pending', uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
+       WHERE id = ? AND wedding_id = ? AND uploader_user_id = ?
+         AND source = ? AND status = 'uploading'
+       RETURNING id, status, uploaded_at`,
+    ).bind(
+      media.id, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
+    ).first<{ id: number; status: string; uploaded_at: string | null }>();
+    if (!update || update.status !== 'pending' || !update.uploaded_at) {
+      throw new Error(`Photo proof ${media.id} did not complete`);
+    }
+  } else if (media.status !== 'pending') {
+    return json({ error: 'Photo proof is not uploadable' }, 409);
+  }
+
+  if (media.preview_status !== 'ready') await services.enqueueMediaPreview(media.id);
+  return json({ mediaId: media.id, status: 'pending' });
+}
+
+async function completePhotoMissionResponse(
+  request: Request,
+  env: FantasposiEnv,
+  resolved: { user: AuthenticatedUser; wedding: WeddingRow },
+  player: PlayerRow & { id: number },
+  missionId: number,
+): Promise<Response> {
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return json({ error: 'Photo mission requires mediaId' }, 400);
+  }
+  const mediaId = parsePhotoProofMediaId(input);
+  if (mediaId === null) {
+    return json({ error: 'Photo mission requires a valid mediaId' }, 400);
+  }
+
+  const existing = await env.DB.prepare(
+    `SELECT id, player_id, mission_id, status, completed_at, points_awarded, media_id
+     FROM fantasposi_player_missions
+     WHERE wedding_id = ? AND player_id = ? AND mission_id = ? AND status = 'completed'
+     LIMIT 1`,
+  ).bind(resolved.wedding.id, player.id, missionId).first<CompletionRow>();
+  if (existing) {
+    if (existing.media_id !== mediaId) {
+      return json({ error: 'Mission already completed with a different photo proof' }, 409);
+    }
+    return completedMissionPayload(env, resolved.wedding.id, player.id, missionId, existing, true);
+  }
+
+  const mission = await photoMissionState(env, resolved.wedding.id, missionId);
+  const unavailable = unavailablePhotoMissionResponse(mission);
+  if (unavailable || !mission) return unavailable ?? json({ error: 'Photo mission not found' }, 404);
+  const expectedPrefix = photoProofPrefix(resolved.wedding.slug, mission.code);
+  const media = await env.DB.prepare(
+    `SELECT id, wedding_id, uploader_user_id, source, original_key, mime_type,
+            size_bytes, status, preview_status, uploaded_at
+     FROM media
+     WHERE id = ? AND wedding_id = ? AND uploader_user_id = ? AND source = ?
+     LIMIT 1`,
+  ).bind(
+    mediaId, resolved.wedding.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
+  ).first<ProofMediaRow>();
+  if (!media) return json({ error: 'Photo proof not found' }, 404);
+  if (!isPhotoProofOriginalKey(media.original_key, resolved.wedding.slug, mission.code)) {
+    return json({ error: 'Photo proof does not belong to this mission' }, 409);
+  }
+  if (!isSupportedImageMimeType(media.mime_type)) return json({ error: 'Photo proof must be an image' }, 409);
+  if (media.status !== 'pending' || !media.uploaded_at) return json({ error: 'Photo proof upload is incomplete' }, 409);
+  const proofObject = await env.MEDIA_BUCKET.head(media.original_key);
+  if (!proofObject) return json({ error: 'Photo proof object not found' }, 409);
+  if (proofObject.size !== media.size_bytes) {
+    return json({ error: 'Photo proof object size does not match' }, 409);
+  }
+
+  let completion = await env.DB.prepare(
+    `UPDATE fantasposi_player_missions completion
+     SET status = 'completed', completed_at = CURRENT_TIMESTAMP,
+         points_awarded = mission.points, media_id = media.id,
+         updated_at = CURRENT_TIMESTAMP
+     FROM fantasposi_missions mission
+     INNER JOIN fantasposi_phases phase
+       ON phase.id = mission.phase_id AND phase.wedding_id = mission.wedding_id
+     INNER JOIN media
+       ON media.id = ? AND media.wedding_id = mission.wedding_id
+      AND media.uploader_user_id = ? AND media.source = ?
+      AND media.mime_type LIKE 'image/%' AND media.status = 'pending'
+      AND media.uploaded_at IS NOT NULL AND media.original_key LIKE ?
+     WHERE completion.wedding_id = ? AND completion.player_id = ?
+       AND completion.mission_id = mission.id AND completion.mission_id = ?
+       AND completion.status <> 'completed'
+       AND mission.wedding_id = completion.wedding_id
+       AND mission.mission_type = 'photo' AND mission.active = true
+       AND phase.status = 'active'
+       AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
+       AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
+       AND NOT EXISTS (
+         SELECT 1 FROM fantasposi_player_missions used
+         WHERE used.media_id = media.id AND used.id <> completion.id
+       )
+     RETURNING completion.id, completion.player_id, completion.mission_id,
+               completion.status, completion.completed_at,
+               completion.points_awarded, completion.media_id`,
+  ).bind(
+    media.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE, `${expectedPrefix}%`,
+    resolved.wedding.id, player.id, missionId,
+  ).first<CompletionRow>();
+
+  if (!completion) completion = await env.DB.prepare(
+    `INSERT INTO fantasposi_player_missions (
+       wedding_id, player_id, mission_id, status, completed_at,
+       points_awarded, media_id, updated_at
+     )
+     SELECT mission.wedding_id, ?, mission.id, 'completed', CURRENT_TIMESTAMP,
+            mission.points, media.id, CURRENT_TIMESTAMP
+     FROM fantasposi_missions mission
+     INNER JOIN fantasposi_phases phase
+       ON phase.id = mission.phase_id AND phase.wedding_id = mission.wedding_id
+     INNER JOIN media
+       ON media.id = ? AND media.wedding_id = mission.wedding_id
+      AND media.uploader_user_id = ? AND media.source = ?
+      AND media.mime_type LIKE 'image/%' AND media.status = 'pending'
+      AND media.uploaded_at IS NOT NULL AND media.original_key LIKE ?
+     WHERE mission.id = ? AND mission.wedding_id = ?
+       AND mission.mission_type = 'photo' AND mission.active = true
+       AND phase.status = 'active'
+       AND (mission.opens_at IS NULL OR mission.opens_at <= CURRENT_TIMESTAMP)
+       AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
+       AND NOT EXISTS (
+         SELECT 1 FROM fantasposi_player_missions used WHERE used.media_id = media.id
+       )
+     ON CONFLICT DO NOTHING
+     RETURNING id, player_id, mission_id, status, completed_at, points_awarded, media_id`,
+  ).bind(
+    player.id, media.id, resolved.user.id, FANTASPOSI_PROOF_SOURCE,
+    `${expectedPrefix}%`, missionId, resolved.wedding.id,
+  ).first<CompletionRow>();
+
+  if (!completion) {
+    const concurrent = await env.DB.prepare(
+      `SELECT id, player_id, mission_id, status, completed_at, points_awarded, media_id
+       FROM fantasposi_player_missions
+       WHERE wedding_id = ? AND player_id = ? AND mission_id = ? AND status = 'completed'
+       LIMIT 1`,
+    ).bind(resolved.wedding.id, player.id, missionId).first<CompletionRow>();
+    if (concurrent) {
+      if (concurrent.media_id !== media.id) {
+        return json({ error: 'Mission already completed with a different photo proof' }, 409);
+      }
+      return completedMissionPayload(
+        env, resolved.wedding.id, player.id, missionId, concurrent, true,
+      );
+    }
+    const used = await env.DB.prepare(
+      'SELECT id FROM fantasposi_player_missions WHERE media_id = ? LIMIT 1',
+    ).bind(media.id).first<{ id: number }>();
+    if (used) return json({ error: 'Photo proof has already been used for another mission' }, 409);
+    return json({ error: 'Photo mission completion could not be recorded' }, 409);
+  }
+  return completedMissionPayload(env, resolved.wedding.id, player.id, missionId, completion, false);
+}
+
 async function completeMissionResponse(
   request: Request,
   env: FantasposiEnv,
@@ -723,6 +1075,15 @@ async function completeMissionResponse(
   if (!resolved.ok) return resolved.response;
   const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
   if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  const missionType = await env.DB.prepare(
+    'SELECT mission_type FROM fantasposi_missions WHERE id = ? AND wedding_id = ? LIMIT 1',
+  ).bind(missionId, resolved.wedding.id).first<{ mission_type: string }>();
+  if (missionRequiresPhotoProof(missionType?.mission_type ?? '')) {
+    return completePhotoMissionResponse(
+      request, env, resolved, { ...player, id: player.id }, missionId,
+    );
+  }
 
   let completion = await env.DB.prepare(
     `UPDATE fantasposi_player_missions completion
@@ -745,7 +1106,8 @@ async function completeMissionResponse(
        AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
        AND mission.mission_type IN ('action', 'social')
      RETURNING completion.id, completion.player_id, completion.mission_id,
-               completion.status, completion.completed_at, completion.points_awarded`,
+               completion.status, completion.completed_at, completion.points_awarded,
+               completion.media_id`,
   ).bind(resolved.wedding.id, player.id, missionId).first<CompletionRow>();
 
   if (!completion) {
@@ -766,14 +1128,15 @@ async function completeMissionResponse(
          AND (mission.closes_at IS NULL OR mission.closes_at > CURRENT_TIMESTAMP)
          AND mission.mission_type IN ('action', 'social')
        ON CONFLICT (player_id, mission_id) DO NOTHING
-       RETURNING id, player_id, mission_id, status, completed_at, points_awarded`,
+       RETURNING id, player_id, mission_id, status, completed_at, points_awarded, media_id`,
     ).bind(player.id, missionId, resolved.wedding.id).first<CompletionRow>();
   }
 
   if (!completion) {
     const existing = await env.DB.prepare(
       `SELECT completion.id, completion.player_id, completion.mission_id,
-              completion.status, completion.completed_at, completion.points_awarded
+              completion.status, completion.completed_at, completion.points_awarded,
+              completion.media_id
        FROM fantasposi_player_missions completion
        WHERE completion.wedding_id = ?
          AND completion.player_id = ?
@@ -860,9 +1223,11 @@ async function completedMissionPayload(
       id: completion.id,
       completedAt: completion.completed_at,
       pointsAwarded: completion.points_awarded,
+      mediaId: completion.media_id,
     },
     alreadyCompleted,
     pointsAwarded: completion.points_awarded,
+    mediaId: completion.media_id,
     totalPoints: summary.total_points,
   });
 }
@@ -935,6 +1300,7 @@ async function onboardingResponse(request: Request, env: FantasposiEnv): Promise
 export async function handleFantasposiRequest(
   request: Request,
   env: FantasposiEnv,
+  mediaServices: FantasposiMediaServices,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/fantasposi/')) return null;
@@ -954,6 +1320,26 @@ export async function handleFantasposiRequest(
     }
     if (request.method === 'GET' && url.pathname === '/api/fantasposi/predictions') {
       return predictionsResponse(request, env);
+    }
+    const createPhotoProof = url.pathname.match(/^\/api\/fantasposi\/missions\/(\d+)\/proof\/create$/);
+    if (request.method === 'POST' && createPhotoProof) {
+      const missionId = Number(createPhotoProof[1]);
+      if (!Number.isSafeInteger(missionId) || missionId <= 0) {
+        return json({ error: 'Invalid mission ID' }, 400);
+      }
+      return createPhotoProofResponse(request, env, mediaServices, missionId);
+    }
+    const completePhotoProof = url.pathname.match(
+      /^\/api\/fantasposi\/missions\/(\d+)\/proof\/(\d+)\/complete$/,
+    );
+    if (request.method === 'POST' && completePhotoProof) {
+      const missionId = Number(completePhotoProof[1]);
+      const mediaId = Number(completePhotoProof[2]);
+      if (!Number.isSafeInteger(missionId) || missionId <= 0
+        || !Number.isSafeInteger(mediaId) || mediaId <= 0) {
+        return json({ error: 'Invalid photo proof ID' }, 400);
+      }
+      return completePhotoProofUploadResponse(request, env, mediaServices, missionId, mediaId);
     }
     const answerPrediction = url.pathname.match(/^\/api\/fantasposi\/predictions\/(\d+)\/answer$/);
     if (request.method === 'PUT' && answerPrediction) {

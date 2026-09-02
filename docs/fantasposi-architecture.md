@@ -99,7 +99,7 @@ Le tabelle hanno chiavi stabili, `wedding_id`, timestamp e relazioni normalizzat
 
 ## Mission Engine V1
 
-Una missione è mostrata al giocatore quando appartiene al wedding corrente, è attiva e la relativa fase è `active`. In V1 solo i tipi `action` e `social` possono essere completati manualmente. I tipi `photo`, `live` e `automatic` restano riservati a implementazioni future.
+Una missione è mostrata al giocatore quando appartiene al wedding corrente, è attiva e la relativa fase è `active`. I tipi `action` e `social` si completano manualmente; `photo` richiede una proof valida. I tipi `live` e `automatic` restano riservati a implementazioni future.
 
 ### Completion flow
 
@@ -185,7 +185,7 @@ Il pannello admin esistente contiene l’area FantaSposi con:
 
 - panoramica di giocatori, missioni, completion e punti squadra;
 - modifica nome, ordine e stato delle fasi;
-- creazione, modifica, attivazione e disattivazione di missioni `action`/`social`;
+- creazione, modifica, attivazione e disattivazione di missioni `action`/`social`/`photo`;
 - eliminazione solo di missioni senza completion, per non distruggere lo storico punti.
 - CRUD dei pronostici non ancora usati e azioni esplicite di apertura, chiusura e risoluzione.
 
@@ -193,7 +193,7 @@ Le API sono sotto `/api/admin/fantasposi/*`, ereditano la normale autorizzazione
 
 ### Limiti Mission Engine V1
 
-- nessun proof fotografico o workflow di approvazione;
+- nessun workflow di approvazione o verifica semantica delle proof fotografiche;
 - nessun Realtime, timer live, prerequisito o mission chain;
 - nessuna modifica o revoca delle completion;
 - nessuna missione automatica;
@@ -201,12 +201,50 @@ Le API sono sotto `/api/admin/fantasposi/*`, ereditano la normale autorizzazione
 
 ## Non implementato
 
-- catalogo definitivo, prove fotografiche e approvazioni;
+- catalogo definitivo e approvazione/moderazione delle prove fotografiche;
 - classifiche avanzate e Realtime;
 - realtime, notifiche e badge;
 - missioni segrete o live;
 - pannello amministrativo FantaSposi;
 - configurazione remota del provider Google.
+
+## Photo Proof model
+
+Le missioni `photo` estendono il Mission Engine e riusano la tabella `media`, la
+pipeline preview e lo stesso bucket R2 delle foto del matrimonio. Non esiste un
+secondo media system. Ogni originale usa una chiave generata esclusivamente dal
+Worker nel namespace privato:
+
+`weddings/{wedding-slug}/fantasposi/proofs/{mission-code}/originals/{uuid}.{ext}`
+
+Il record ha `source = fantasposi_proof`, `wedding_id` e
+`uploader_user_id`. La completion conserva soltanto `media_id`; la foreign key
+composita con `wedding_id` impedisce associazioni cross-wedding e un indice
+univoco impedisce di riusare la stessa prova per missioni diverse.
+
+### Trust e visibilità V1
+
+La presenza di un’immagine caricata e finalizzata è prova sufficiente. V1 non
+esegue moderazione, approvazione, AI verification o validazione semantica. Le
+proof non sono media pubblici e sono escluse dalle API e dalle operazioni della
+gallery, anche quando possiedono preview tecniche. Una futura azione esplicita
+di promozione potrà riusare lo stesso oggetto R2 senza duplicarlo.
+
+### Upload e completion
+
+Il player autenticato richiede al Worker una singola signed PUT URL; filename,
+player ID, wedding ID e object key non sono mai fidati dal client. Il Worker
+accetta solo i MIME immagine e i limiti già condivisi dal media system, verifica
+in R2 presenza e dimensione dell’oggetto e finalizza il record prima di
+consentire la completion. La completion verifica nuovamente JWT, player attivo,
+wedding, ownership, source, prefisso R2, MIME, stato upload, fase e finestra
+temporale. Il tempo autorevole è quello della completion: una foto iniziata
+prima di `closes_at` non assegna punti se la richiesta arriva dopo la chiusura.
+
+Il vincolo player/mission mantiene l’idempotenza e `points_awarded` congela il
+punteggio storico. Un upload riuscito seguito da completion fallita può lasciare
+una proof non referenziata: è accettato in V1; una futura manutenzione potrà
+rimuovere proof non usate più vecchie di una soglia configurata.
 
 ## Roadmap breve
 

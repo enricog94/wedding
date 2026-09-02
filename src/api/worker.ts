@@ -2,6 +2,11 @@ import { handleContentRequest } from './content';
 import { handleFantasposiRequest } from './fantasposi';
 import { handleAdminFantasposiRequest } from './fantasposi-admin';
 import { createPostgresDatabase, type Database } from '../lib/supabase-db';
+import {
+  FANTASPOSI_PROOF_SOURCE,
+  MEDIA_TYPES,
+  type SupportedMimeType,
+} from '../lib/media-types';
 
 export interface WorkerEnv {
   MEDIA_BUCKET: R2Bucket;
@@ -34,16 +39,6 @@ const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' };
 const MEGABYTE = 1024 * 1024;
 const R2_BUCKET_NAME = 'wedding-media';
 const PRESIGNED_URL_TTL_SECONDS = 10 * 60;
-const MEDIA_TYPES = {
-  'image/jpeg': { extension: 'jpg', maxSize: 20 * MEGABYTE },
-  'image/png': { extension: 'png', maxSize: 20 * MEGABYTE },
-  'image/webp': { extension: 'webp', maxSize: 20 * MEGABYTE },
-  'image/heic': { extension: 'heic', maxSize: 20 * MEGABYTE },
-  'image/heif': { extension: 'heif', maxSize: 20 * MEGABYTE },
-  'video/mp4': { extension: 'mp4', maxSize: 500 * MEGABYTE },
-  'video/quicktime': { extension: 'mov', maxSize: 500 * MEGABYTE },
-} as const;
-
 const SITE_ASSET_TYPES = new Set(['hero', 'story', 'location', 'info', 'other']);
 const SITE_IMAGE_TYPES = {
   'image/jpeg': { extension: 'jpg' },
@@ -53,8 +48,6 @@ const SITE_IMAGE_TYPES = {
   'image/heif': { extension: 'heif' },
 } as const;
 const SITE_ASSET_MAX_SIZE = 20 * MEGABYTE;
-
-type SupportedMimeType = keyof typeof MEDIA_TYPES;
 
 export type MediaProcessingMessage =
   | { kind?: 'media'; mediaId: number }
@@ -484,7 +477,7 @@ async function setOwnedMediaStatus(
   requireReadyImagePreview = false,
 ): Promise<MediaStatusMutation> {
   const media = await findOwnedMedia(env, weddingId, mediaId);
-  if (!media) return 'not_found';
+  if (!media || media.source === FANTASPOSI_PROOF_SOURCE) return 'not_found';
   if (!allowedStatuses.has(media.status)) return 'invalid_status';
   if (requireReadyImagePreview && media.mime_type.startsWith('image/') && media.preview_status !== 'ready') {
     return 'preview_not_ready';
@@ -542,7 +535,7 @@ async function bulkSetOwnedMediaStatus(
             SELECT m.id, m.wedding_id, m.status, m.mime_type, m.preview_status
             FROM media m
             INNER JOIN requested r ON r.id = m.id
-            WHERE m.wedding_id = ?
+            WHERE m.wedding_id = ? AND m.source <> ?
           ),
           updated AS (
             UPDATE media m
@@ -564,7 +557,9 @@ async function bulkSetOwnedMediaStatus(
      LEFT JOIN candidates c ON c.id = r.id
      LEFT JOIN updated u ON u.id = r.id
      ORDER BY r.id`,
-  ).bind(...ids, weddingId, nextStatus, weddingId).all<BulkMediaMutationRow>();
+  ).bind(
+    ...ids, weddingId, FANTASPOSI_PROOF_SOURCE, nextStatus, weddingId,
+  ).all<BulkMediaMutationRow>();
 
   const updatedIds: number[] = [];
   const unchangedIds: number[] = [];
@@ -607,7 +602,7 @@ async function deleteR2Keys(env: Env, keys: Array<string | null>): Promise<void>
 
 async function deleteOwnedMedia(env: Env, wedding: WeddingRow, mediaId: number): Promise<boolean> {
   const media = await findOwnedMedia(env, wedding.id, mediaId);
-  if (!media) return false;
+  if (!media || media.source === FANTASPOSI_PROOF_SOURCE) return false;
 
   await env.DB.prepare(
     'UPDATE wedding_story_items SET photo_media_id = NULL WHERE wedding_id = ? AND photo_media_id = ?',
@@ -759,6 +754,7 @@ function isImageMimeType(mimeType: string): boolean {
 }
 
 function previewSourceDirectory(source: string): string {
+  if (source === FANTASPOSI_PROOF_SOURCE) return 'fantasposi/proofs';
   return source === 'guest' ? 'guests' : source.replace(/[^a-z0-9-]/g, '') || 'media';
 }
 
@@ -1078,7 +1074,10 @@ export default {
       return json({ supabaseUrl, anonKey });
     }
 
-    const fantasposiResponse = await handleFantasposiRequest(request, env);
+    const fantasposiResponse = await handleFantasposiRequest(request, env, {
+      createPresignedPutUrl: (objectKey) => createPresignedPutUrl(env, objectKey),
+      enqueueMediaPreview: (mediaId) => enqueueMediaPreview(env, mediaId),
+    });
     if (fantasposiResponse) return fantasposiResponse;
 
     const adminAuthorization = url.pathname.startsWith('/api/admin/')
@@ -1420,10 +1419,10 @@ export default {
                   preview_generated_at, mime_type, size_bytes, width, height, sha256,
                   status, created_at, uploaded_at
            FROM media
-           WHERE wedding_id = ? AND status = 'pending'
+           WHERE wedding_id = ? AND status = 'pending' AND source <> ?
            ORDER BY created_at DESC, id DESC`,
         )
-          .bind(wedding.id)
+          .bind(wedding.id, FANTASPOSI_PROOF_SOURCE)
           .all<MediaRow>();
 
         return json({
@@ -1450,8 +1449,8 @@ export default {
         }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
 
-        const conditions = ['wedding_id = ?'];
-        const bindings: Array<number | string> = [wedding.id];
+        const conditions = ['wedding_id = ?', 'source <> ?'];
+        const bindings: Array<number | string> = [wedding.id, FANTASPOSI_PROOF_SOURCE];
         if (status !== 'all') {
           conditions.push('status = ?');
           bindings.push(status);
@@ -1478,9 +1477,9 @@ export default {
                     COUNT(*) FILTER (WHERE mime_type LIKE 'video/%') AS videos,
                     COALESCE(SUM(size_bytes), 0) AS storage_bytes
              FROM media
-             WHERE wedding_id = ?`,
+             WHERE wedding_id = ? AND source <> ?`,
           )
-            .bind(wedding.id)
+            .bind(wedding.id, FANTASPOSI_PROOF_SOURCE)
             .first<AdminMediaStatsRow>(),
         ]);
 
@@ -1518,11 +1517,12 @@ export default {
         const media = await env.DB.prepare(
           `SELECT thumbnail_key, preview_key
            FROM media
-           WHERE id = ? AND wedding_id = ? AND status IN ('uploading', 'pending', 'approved', 'hidden')
+           WHERE id = ? AND wedding_id = ? AND source <> ?
+                 AND status IN ('uploading', 'pending', 'approved', 'hidden')
                  AND preview_status = 'ready'
            LIMIT 1`,
         )
-          .bind(mediaId, wedding.id)
+          .bind(mediaId, wedding.id, FANTASPOSI_PROOF_SOURCE)
           .first<Pick<MediaRow, 'thumbnail_key' | 'preview_key'>>();
         if (!media) return json({ error: 'Preview not found' }, 404);
         return previewResponse(env, media, variant, request, true);
@@ -1554,10 +1554,11 @@ export default {
                   preview_generated_at, mime_type, size_bytes, width, height, sha256,
                   status, created_at, uploaded_at
            FROM media
-           WHERE id = ? AND wedding_id = ? AND status IN ('uploading', 'pending', 'approved', 'hidden')
+           WHERE id = ? AND wedding_id = ? AND source <> ?
+                 AND status IN ('uploading', 'pending', 'approved', 'hidden')
            LIMIT 1`,
         )
-          .bind(mediaId, wedding.id)
+          .bind(mediaId, wedding.id, FANTASPOSI_PROOF_SOURCE)
           .first<MediaRow>();
 
         if (!media) {
@@ -1743,9 +1744,9 @@ export default {
         let deleted = 0;
         while (true) {
           const batch = await env.DB.prepare(
-            'SELECT id FROM media WHERE wedding_id = ? ORDER BY id LIMIT 50',
+            'SELECT id FROM media WHERE wedding_id = ? AND source <> ? ORDER BY id LIMIT 50',
           )
-            .bind(wedding.id)
+            .bind(wedding.id, FANTASPOSI_PROOF_SOURCE)
             .all<{ id: number }>();
           const ids = batch.results.map((row) => row.id);
           if (ids.length === 0) break;
@@ -1970,10 +1971,10 @@ export default {
                   preview_generated_at, mime_type, size_bytes, width, height, sha256,
                   status, created_at, uploaded_at
            FROM media
-           WHERE wedding_id = ?
+           WHERE wedding_id = ? AND source <> ?
            ORDER BY created_at DESC, id DESC`,
         )
-          .bind(wedding.id)
+          .bind(wedding.id, FANTASPOSI_PROOF_SOURCE)
           .all<MediaRow>();
 
         return json({ media: result.results.map(serializeMedia) });
@@ -2001,10 +2002,10 @@ export default {
         const result = await env.DB.prepare(
           `SELECT id, uuid, source, mime_type, created_at, preview_status
            FROM media
-           WHERE wedding_id = ? AND status = 'approved'
+           WHERE wedding_id = ? AND status = 'approved' AND source <> ?
            ORDER BY created_at DESC, id DESC`,
         )
-          .bind(wedding.id)
+          .bind(wedding.id, FANTASPOSI_PROOF_SOURCE)
           .all<GalleryRow>();
 
         return json({
@@ -2053,11 +2054,11 @@ export default {
         const media = await env.DB.prepare(
           `SELECT thumbnail_key, preview_key
            FROM media
-           WHERE id = ? AND wedding_id = ? AND status = 'approved'
+           WHERE id = ? AND wedding_id = ? AND status = 'approved' AND source <> ?
                  AND preview_status = 'ready'
            LIMIT 1`,
         )
-          .bind(mediaId, wedding.id)
+          .bind(mediaId, wedding.id, FANTASPOSI_PROOF_SOURCE)
           .first<Pick<MediaRow, 'thumbnail_key' | 'preview_key'>>();
         if (!media) return json({ error: 'Preview not found' }, 404);
         return previewResponse(env, media, variant, request, false);
@@ -2092,10 +2093,10 @@ export default {
                   preview_generated_at, mime_type, size_bytes, width, height, sha256,
                   status, created_at, uploaded_at
            FROM media
-           WHERE id = ? AND wedding_id = ? AND status = 'approved'
+           WHERE id = ? AND wedding_id = ? AND status = 'approved' AND source <> ?
            LIMIT 1`,
         )
-          .bind(mediaId, wedding.id)
+          .bind(mediaId, wedding.id, FANTASPOSI_PROOF_SOURCE)
           .first<MediaRow>();
 
         if (!media) {
@@ -2142,11 +2143,11 @@ export default {
         const media = await env.DB.prepare(
           `SELECT id, original_filename, original_key, mime_type
            FROM media
-           WHERE id = ? AND wedding_id = ? AND status = 'approved'
+           WHERE id = ? AND wedding_id = ? AND status = 'approved' AND source <> ?
                  AND original_key IS NOT NULL AND original_key != ''
            LIMIT 1`,
         )
-          .bind(mediaId, wedding.id)
+          .bind(mediaId, wedding.id, FANTASPOSI_PROOF_SOURCE)
           .first<Pick<MediaRow, 'id' | 'original_filename' | 'original_key' | 'mime_type'>>();
         if (!media) return json({ error: 'Media not found' }, 404);
 

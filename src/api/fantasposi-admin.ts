@@ -1,4 +1,5 @@
 import type { Database } from '../lib/supabase-db';
+import { isValidTimeWindow, parseOptionalTimestamp } from '../lib/fantasposi-domain';
 
 type AdminFantasyEnv = {
   DB: Database;
@@ -148,7 +149,7 @@ type MissionInput = {
   phaseId: number;
   title: string;
   description: string | null;
-  missionType: 'action' | 'social';
+  missionType: 'action' | 'social' | 'photo';
   points: number;
   active: boolean;
   sortOrder: number;
@@ -160,42 +161,42 @@ type MissionInputResult =
   | { value: MissionInput; invalidField: null }
   | { value: null; invalidField: string };
 
-function parseMissionInput(input: unknown): MissionInputResult {
+export function parseMissionInput(input: unknown): MissionInputResult {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { value: null, invalidField: 'payload' };
   }
   const body = input as Record<string, unknown>;
   const code = typeof body.code === 'string' ? body.code.trim().toLowerCase() : '';
-  const phaseId = Number(body.phaseId);
+  const phaseId = body.phaseId;
   const title = typeof body.title === 'string' ? body.title.trim() : '';
   const description = typeof body.description === 'string' && body.description.trim()
     ? body.description.trim()
     : null;
   const missionType = body.missionType;
-  const points = Number(body.points);
+  const points = body.points;
   const active = body.active;
-  const sortOrder = Number(body.sortOrder);
-  const opensAt = parseTimestamp(body.opensAt);
-  const closesAt = parseTimestamp(body.closesAt);
+  const sortOrder = body.sortOrder;
+  const opensAt = parseOptionalTimestamp(body.opensAt);
+  const closesAt = parseOptionalTimestamp(body.closesAt);
   let invalidField: string | null = null;
   if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(code)) invalidField = 'code';
-  else if (!Number.isSafeInteger(phaseId) || phaseId <= 0) invalidField = 'phaseId';
+  else if (typeof phaseId !== 'number' || !Number.isSafeInteger(phaseId) || phaseId <= 0) invalidField = 'phaseId';
   else if (title.length < 2 || title.length > 140) invalidField = 'title';
   else if ((description?.length ?? 0) > 1000) invalidField = 'description';
-  else if (missionType !== 'action' && missionType !== 'social') invalidField = 'missionType';
-  else if (!Number.isSafeInteger(points) || points < 0 || points > 10_000) invalidField = 'points';
+  else if (missionType !== 'action' && missionType !== 'social' && missionType !== 'photo') invalidField = 'missionType';
+  else if (typeof points !== 'number' || !Number.isSafeInteger(points) || points < 0 || points > 10_000) invalidField = 'points';
   else if (typeof active !== 'boolean') invalidField = 'active';
-  else if (!Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000) invalidField = 'sortOrder';
+  else if (typeof sortOrder !== 'number' || !Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000) invalidField = 'sortOrder';
   else if (opensAt === undefined) invalidField = 'opensAt';
   else if (closesAt === undefined) invalidField = 'closesAt';
-  else if (opensAt && closesAt && opensAt >= closesAt) invalidField = 'timeRange';
+  else if (!isValidTimeWindow(opensAt, closesAt)) invalidField = 'timeRange';
 
   if (invalidField) return { value: null, invalidField };
   return {
     value: {
-      code, phaseId, title, description,
-      missionType: missionType as 'action' | 'social', points,
-      active: active as boolean, sortOrder,
+      code, phaseId: phaseId as number, title, description,
+      missionType: missionType as 'action' | 'social' | 'photo', points: points as number,
+      active: active as boolean, sortOrder: sortOrder as number,
       opensAt: opensAt as string | null,
       closesAt: closesAt as string | null,
     },
@@ -203,13 +204,7 @@ function parseMissionInput(input: unknown): MissionInputResult {
   };
 }
 
-function parseTimestamp(value: unknown): string | null | undefined {
-  if (value === null || value === '' || value === undefined) return null;
-  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return undefined;
-  return new Date(value).toISOString();
-}
-
-function parsePredictionInput(input: unknown): PredictionInput | null {
+export function parsePredictionInput(input: unknown): PredictionInput | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const body = input as Record<string, unknown>;
   const code = typeof body.code === 'string' ? body.code.trim().toLowerCase() : '';
@@ -217,11 +212,11 @@ function parsePredictionInput(input: unknown): PredictionInput | null {
   const description = typeof body.description === 'string' && body.description.trim()
     ? body.description.trim() : null;
   const phaseId = body.phaseId === null || body.phaseId === '' || body.phaseId === undefined
-    ? null : Number(body.phaseId);
-  const points = Number(body.points);
-  const sortOrder = Number(body.sortOrder);
-  const opensAt = parseTimestamp(body.opensAt);
-  const closesAt = parseTimestamp(body.closesAt);
+    ? null : body.phaseId;
+  const points = body.points;
+  const sortOrder = body.sortOrder;
+  const opensAt = parseOptionalTimestamp(body.opensAt);
+  const closesAt = parseOptionalTimestamp(body.closesAt);
   const rawOptions = Array.isArray(body.options) ? body.options : [];
   const options = rawOptions.map((value, index) => {
     const option = value && typeof value === 'object' && !Array.isArray(value)
@@ -229,24 +224,30 @@ function parsePredictionInput(input: unknown): PredictionInput | null {
     return {
       code: typeof option.code === 'string' ? option.code.trim().toLowerCase() : '',
       label: typeof option.label === 'string' ? option.label.trim() : '',
-      sortOrder: Number.isSafeInteger(Number(option.sortOrder)) ? Number(option.sortOrder) : index,
+      sortOrder: option.sortOrder === undefined ? index : option.sortOrder,
     };
   });
   if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(code)
     || question.length < 3 || question.length > 240
     || (description?.length ?? 0) > 1500
-    || (phaseId !== null && (!Number.isSafeInteger(phaseId) || phaseId <= 0))
-    || !Number.isSafeInteger(points) || points < 0 || points > 10_000
-    || !Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000
+    || (phaseId !== null && (typeof phaseId !== 'number' || !Number.isSafeInteger(phaseId) || phaseId <= 0))
+    || typeof points !== 'number' || !Number.isSafeInteger(points) || points < 0 || points > 10_000
+    || typeof sortOrder !== 'number' || !Number.isSafeInteger(sortOrder) || sortOrder < 0 || sortOrder > 100_000
     || opensAt === undefined || closesAt === undefined
-    || (opensAt && closesAt && opensAt >= closesAt)
+    || !isValidTimeWindow(opensAt, closesAt)
     || options.length < 2 || options.length > 12
     || options.some((option) => !/^[a-z0-9][a-z0-9-]{0,19}$/.test(option.code)
       || option.label.length < 1 || option.label.length > 160
+      || typeof option.sortOrder !== 'number' || !Number.isSafeInteger(option.sortOrder)
       || option.sortOrder < 0 || option.sortOrder > 1000)
     || new Set(options.map((option) => option.code)).size !== options.length
   ) return null;
-  return { code, question, description, phaseId, points, sortOrder, opensAt, closesAt, options };
+  return {
+    code, question, description, phaseId: phaseId as number | null,
+    points: points as number, sortOrder: sortOrder as number,
+    opensAt, closesAt,
+    options: options as PredictionInput['options'],
+  };
 }
 
 function serializeAdminPredictions(rows: AdminPredictionRow[]) {
