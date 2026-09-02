@@ -14,6 +14,15 @@ export type SupportedMimeType = keyof typeof MEDIA_TYPES;
 export type SupportedImageMimeType = Extract<SupportedMimeType, `image/${string}`>;
 
 export const FANTASPOSI_PROOF_SOURCE = 'fantasposi_proof';
+export const FANTASPOSI_AVATAR_SOURCE = 'fantasposi_avatar';
+export const PRIVATE_GAME_MEDIA_SOURCES = [
+  FANTASPOSI_PROOF_SOURCE,
+  FANTASPOSI_AVATAR_SOURCE,
+] as const;
+
+export function isPrivateGameMediaSource(source: string): boolean {
+  return PRIVATE_GAME_MEDIA_SOURCES.some((privateSource) => privateSource === source);
+}
 
 export function isSupportedImageMimeType(value: string): value is SupportedImageMimeType {
   return Object.prototype.hasOwnProperty.call(MEDIA_TYPES, value) && value.startsWith('image/');

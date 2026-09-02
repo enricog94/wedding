@@ -1,4 +1,5 @@
 import {
+  FANTASPOSI_AVATAR_SOURCE,
   MEDIA_TYPES,
   type SupportedImageMimeType,
 } from './media-types';
@@ -177,12 +178,51 @@ export function parsePhotoProofMediaId(input: unknown): number | null {
   return parsePositiveInteger((input as Record<string, unknown>).mediaId);
 }
 
+export const FANTASPOSI_AVATAR_MAX_SIZE = 10 * 1024 * 1024;
+
+export function parseAvatarCreateInput(input: unknown): PhotoProofCreateInputResult {
+  const parsed = parsePhotoProofCreateInput(input);
+  if (parsed.value && parsed.value.size > FANTASPOSI_AVATAR_MAX_SIZE) {
+    return { value: null, invalidField: 'maxSize' };
+  }
+  return parsed;
+}
+
 export function parsePositiveInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 export function photoProofPrefix(weddingSlug: string, missionCode: string): string {
   return `weddings/${encodeURIComponent(weddingSlug)}/fantasposi/proofs/${encodeURIComponent(missionCode)}/originals/`;
+}
+
+export function playerAvatarPrefix(weddingSlug: string, playerId: number): string {
+  return `weddings/${encodeURIComponent(weddingSlug)}/fantasposi/avatars/${playerId}/originals/`;
+}
+
+export function isPlayerAvatarOriginalKey(
+  objectKey: string,
+  weddingSlug: string,
+  playerId: number,
+): boolean {
+  return objectKey.startsWith(playerAvatarPrefix(weddingSlug, playerId));
+}
+
+export type PlayerAvatarMediaIdentity = {
+  weddingId: number;
+  uploaderUserId: string | null;
+  source: string;
+  originalKey: string;
+};
+
+export function isOwnedPlayerAvatarMedia(
+  media: PlayerAvatarMediaIdentity,
+  expected: { weddingId: number; userId: string; weddingSlug: string; playerId: number },
+): boolean {
+  return media.weddingId === expected.weddingId
+    && media.uploaderUserId === expected.userId
+    && media.source === FANTASPOSI_AVATAR_SOURCE
+    && isPlayerAvatarOriginalKey(media.originalKey, expected.weddingSlug, expected.playerId);
 }
 
 export function isPhotoProofOriginalKey(

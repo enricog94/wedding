@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import {
   configureSupabase,
   getSupabaseAccessToken,
@@ -10,6 +10,7 @@ import {
   type SupabasePublicConfig,
 } from '../lib/supabase';
 import {
+  FANTASPOSI_AVATAR_MAX_SIZE,
   effectiveMissionStatus as getEffectiveMissionStatus,
   effectivePredictionStatus as getEffectivePredictionStatus,
   formatFantasposiCountdown,
@@ -36,6 +37,7 @@ type FantasyPlayer = {
   id: number;
   userId: string;
   displayName: string | null;
+  avatarMediaId: number | null;
   avatarUrl: string | null;
   team: Team;
   onboardingCompleted: boolean;
@@ -178,6 +180,7 @@ type LeaderboardResponse = {
     completedMissions: number;
     rank: number;
     isCurrentUser: boolean;
+    avatarUrl: string | null;
   }>;
   currentPlayer: {
     playerId: number;
@@ -214,6 +217,91 @@ const PHOTO_PROOF_TYPE_LIST = [
 const PHOTO_PROOF_TYPES = new Set<string>(PHOTO_PROOF_TYPE_LIST);
 const PHOTO_PROOF_ACCEPT = PHOTO_PROOF_TYPE_LIST.join(',');
 const PHOTO_PROOF_MAX_SIZE = 20 * 1024 * 1024;
+
+type AppIconName = 'home' | 'missions' | 'predictions' | 'ranking' | 'profile' | 'camera' | 'spark';
+
+function AppIcon({ name }: { name: AppIconName }) {
+  const paths: Record<AppIconName, ReactNode> = {
+    home: <><path d="M3 10.8 12 3l9 7.8" /><path d="M5.5 9.5V21h13V9.5" /></>,
+    missions: <><path d="M12 2.8 14.4 8l5.6 1-4 4 1 5.7-5-2.7-5 2.7 1-5.7-4-4 5.6-1Z" /></>,
+    predictions: <><path d="M4 19.5h16" /><path d="M6 16V9m6 7V5m6 11v-4" /></>,
+    ranking: <><path d="M4 20V10h5v10m2 0V4h5v16m2 0v-7h3v7" /></>,
+    profile: <><circle cx="12" cy="8" r="4" /><path d="M4.5 21c.7-4.2 3.2-6.3 7.5-6.3s6.8 2.1 7.5 6.3" /></>,
+    camera: <><path d="M3 8.5h4l1.5-2.5h7L17 8.5h4V20H3Z" /><circle cx="12" cy="14" r="3.5" /></>,
+    spark: <><path d="m12 2 1.6 5.4L19 9l-5.4 1.6L12 16l-1.6-5.4L5 9l5.4-1.6Z" /><path d="m19 15 .7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7Z" /></>,
+  };
+  return <svg className="fantasposi-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+function initials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'FS';
+}
+
+function PlayerAvatar({
+  name,
+  source,
+  eager = false,
+  className = '',
+}: {
+  name: string;
+  source: string | null;
+  eager?: boolean;
+  className?: string;
+}) {
+  const hostRef = useRef<HTMLSpanElement>(null);
+  const [visible, setVisible] = useState(eager);
+  const [loadedImage, setLoadedImage] = useState<{ source: string; objectUrl: string } | null>(null);
+
+  useEffect(() => {
+    if (eager || visible || !source || source.startsWith('blob:')) return undefined;
+    const node = hostRef.current;
+    if (!node || !('IntersectionObserver' in window)) {
+      setVisible(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisible(true);
+        observer.disconnect();
+      }
+    }, { rootMargin: '120px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [eager, source, visible]);
+
+  useEffect(() => {
+    if (!source || source.startsWith('blob:')) return undefined;
+    if (!visible) return undefined;
+    let active = true;
+    let localUrl: string | null = null;
+    void fantasyFetch(source)
+      .then((response) => response.ok ? response.blob() : Promise.reject(new Error('Avatar unavailable')))
+      .then((blob) => {
+        if (!active) return;
+        localUrl = URL.createObjectURL(blob);
+        setLoadedImage({ source, objectUrl: localUrl });
+      })
+      .catch(() => { if (active) setLoadedImage(null); });
+    return () => {
+      active = false;
+      if (localUrl) URL.revokeObjectURL(localUrl);
+    };
+  }, [source, visible]);
+
+  const objectUrl = source?.startsWith('blob:')
+    ? source
+    : loadedImage?.source === source ? loadedImage.objectUrl : null;
+
+  return (
+    <span ref={hostRef} className={`fantasposi-player-avatar ${className}`} aria-label={`Foto profilo di ${name}`}>
+      {objectUrl ? <img src={objectUrl} alt="" /> : <span aria-hidden="true">{initials(name)}</span>}
+    </span>
+  );
+}
+
+function TeamBadge({ team, children }: { team: Team; children: ReactNode }) {
+  return <span className={`fantasposi-team-badge is-${team}`}>{children}</span>;
+}
 
 function putPhotoProof(
   uploadUrl: string,
@@ -387,11 +475,11 @@ function FantasyOnboarding({ me, onCompleted }: { me: MeResponse; onCompleted: (
 }
 
 const routes = [
-  { path: '/fantasposi', label: 'Home', icon: '⌂' },
-  { path: '/fantasposi/missioni', label: 'Missioni', icon: '✦' },
-  { path: '/fantasposi/pronostici', label: 'Pronostici', icon: '?' },
-  { path: '/fantasposi/classifica', label: 'Classifica', icon: '↗' },
-  { path: '/fantasposi/profilo', label: 'Profilo', icon: '○' },
+  { path: '/fantasposi', label: 'Home', icon: 'home' },
+  { path: '/fantasposi/missioni', label: 'Missioni', icon: 'missions' },
+  { path: '/fantasposi/pronostici', label: 'Pronostici', icon: 'predictions' },
+  { path: '/fantasposi/classifica', label: 'Classifica', icon: 'ranking' },
+  { path: '/fantasposi/profilo', label: 'Profilo', icon: 'profile' },
 ] as const;
 
 function FantasyMissions({
@@ -584,7 +672,7 @@ function FantasyMissions({
     if (file) void uploadPhotoProof(mission, file);
   };
 
-  if (loading) return <section className="fantasposi-placeholder"><p>Caricamento missioni…</p></section>;
+  if (loading) return <FantasySkeleton />;
   const missionCount = data?.phases.reduce((total, group) => total + group.missions.length, 0) ?? 0;
   return (
     <section className="fantasposi-missions">
@@ -603,13 +691,13 @@ function FantasyMissions({
               : effectiveStatus === 'expired' ? 'Tempo scaduto' : null;
           return (
           <article className={`fantasposi-mission is-${effectiveStatus}`} key={mission.id}>
-            <div><p>{mission.missionType === 'photo' ? 'Missione foto' : mission.missionType === 'social' ? 'Missione social' : 'Missione action'}</p><strong>+{mission.points} punti</strong></div>
+            <div><p><AppIcon name={mission.missionType === 'photo' ? 'camera' : 'spark'} />{mission.missionType === 'photo' ? 'Missione foto' : mission.missionType === 'social' ? 'Missione social' : 'Missione action'}</p><strong>+{mission.points} punti</strong></div>
             <h2>{mission.title}</h2>
             {mission.description && <p>{mission.description}</p>}
             {timing && <p className="fantasposi-mission__timing">{timing}</p>}
             {gameState === 'active' && mission.missionType === 'photo' && effectiveStatus === 'available' ? (
               <label className={`fantasposi-mission__photo-button${busyId !== null ? ' is-disabled' : ''}`}>
-                {busyId === mission.id ? 'Caricamento…' : 'Scatta o carica una foto'}
+                <AppIcon name="camera" />{busyId === mission.id ? 'Caricamento…' : 'Scatta / carica foto'}
                 <input type="file" accept={PHOTO_PROOF_ACCEPT} disabled={busyId !== null} onChange={(event) => selectPhotoProof(mission, event)} />
               </label>
             ) : (
@@ -657,7 +745,7 @@ function FantasyLeaderboard({ refreshKey }: { refreshKey: number }) {
     return () => { mounted = false; };
   }, [refreshKey]);
 
-  if (loading) return <section className="fantasposi-placeholder"><p>Caricamento classifica…</p></section>;
+  if (loading) return <FantasySkeleton />;
   if (error) return <section className="fantasposi-placeholder"><p className="fantasposi-error" role="alert">{error}</p></section>;
   if (!data) return null;
 
@@ -680,10 +768,23 @@ function FantasyLeaderboard({ refreshKey }: { refreshKey: number }) {
         {data.currentPlayer && <span>Tu sei {data.currentPlayer.rank}°</span>}
       </div>
       {data.players.length > 0 ? (
+        <>
+        <ol className="fantasposi-podium" aria-label="Podio">
+          {data.players.slice(0, 3).map((player) => (
+            <li key={player.playerId} className={`is-place-${player.rank}${player.isCurrentUser ? ' is-current' : ''}`}>
+              <span className="fantasposi-podium__place">{player.rank}</span>
+              <PlayerAvatar name={player.displayName} source={player.avatarUrl} eager={player.rank <= 3} />
+              <strong>{player.displayName}</strong>
+              <TeamBadge team={player.team}>{data.teams[player.team].name}</TeamBadge>
+              <b>{player.points} pt</b>
+            </li>
+          ))}
+        </ol>
         <ol className="fantasposi-ranking">
           {data.players.map((player) => (
             <li key={player.playerId} className={player.isCurrentUser ? 'is-current' : ''}>
               <span className="fantasposi-ranking__position" aria-label={`Posizione ${player.rank}`}>{player.rank}</span>
+              <PlayerAvatar name={player.displayName} source={player.avatarUrl} />
               <div>
                 <strong>{player.displayName}{player.isCurrentUser ? ' · Tu' : ''}</strong>
                 <small>Team {data.teams[player.team].name} · {player.completedMissions} {player.completedMissions === 1 ? 'missione' : 'missioni'}</small>
@@ -692,6 +793,7 @@ function FantasyLeaderboard({ refreshKey }: { refreshKey: number }) {
             </li>
           ))}
         </ol>
+        </>
       ) : (
         <p className="fantasposi-leaderboard__empty">La classifica non contiene ancora giocatori attivi.</p>
       )}
@@ -766,7 +868,7 @@ function FantasyPredictions({ refreshKey, gameState }: { refreshKey: number; gam
     }
   };
 
-  if (loading) return <section className="fantasposi-placeholder"><p>Caricamento pronostici…</p></section>;
+  if (loading) return <FantasySkeleton />;
   return <section className="fantasposi-predictions">
     <p className="fantasposi-kicker">Fai la tua scelta</p>
     <h1>Pronostici</h1>
@@ -842,7 +944,7 @@ function FantasyFinalResults({ refreshKey }: { refreshKey: number }) {
     return () => { mounted = false; };
   }, [refreshKey]);
   if (error) return <section className="fantasposi-final"><h1>FantaSposi concluso</h1><p className="fantasposi-error">{error}</p></section>;
-  if (!data) return <section className="fantasposi-final"><p>Prepariamo i risultati finali…</p></section>;
+  if (!data) return <FantasySkeleton />;
   const bridePoints = data.teams.bride.points;
   const groomPoints = data.teams.groom.points;
   const winner = bridePoints === groomPoints
@@ -857,7 +959,7 @@ function FantasyFinalResults({ refreshKey }: { refreshKey: number }) {
       {(['bride', 'groom'] as const).map((team) => <article key={team}><span>Team {data.teams[team].name}</span><strong>{data.teams[team].points}</strong></article>)}
       <span className="fantasposi-team-score__versus" aria-hidden="true">VS</span>
     </div>
-    {data.players.length >= 3 && <div className="fantasposi-final__podium"><h2>Podio</h2><ol>{data.players.slice(0, 3).map((player) => <li key={player.playerId}><span>{player.rank}</span><strong>{player.displayName}</strong><b>{player.points} pt</b></li>)}</ol></div>}
+    {data.players.length >= 3 && <div className="fantasposi-final__podium"><h2>Podio</h2><ol>{data.players.slice(0, 3).map((player) => <li key={player.playerId}><span>{player.rank}</span><PlayerAvatar name={player.displayName} source={player.avatarUrl} eager /><strong>{player.displayName}</strong><b>{player.points} pt</b></li>)}</ol></div>}
   </section>;
 }
 
@@ -888,6 +990,161 @@ function usePwaInstall() {
   return { canInstall: Boolean(promptEvent), install, isIos, standalone };
 }
 
+function FantasySkeleton() {
+  return <section className="fantasposi-skeleton" aria-label="Caricamento in corso" aria-busy="true">
+    <span /><span /><span /><span />
+  </section>;
+}
+
+function FantasyProfile({
+  game,
+  rank,
+  install,
+  navigate,
+  onLogout,
+  onAvatarChanged,
+}: {
+  game: BootstrapResponse;
+  rank: number | null;
+  install: ReturnType<typeof usePwaInstall>;
+  navigate: (path: string) => void;
+  onLogout: () => Promise<void>;
+  onAvatarChanged: (mediaId: number, avatarUrl: string | null) => void;
+}) {
+  const displayName = game.player.displayName || 'Giocatore';
+  const teamName = game.wedding.teams[game.player.team];
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (localPreview) URL.revokeObjectURL(localPreview);
+  }, [localPreview]);
+
+  const uploadAvatar = async (file: File) => {
+    setError(''); setMessage('');
+    if (!PHOTO_PROOF_TYPES.has(file.type)) {
+      setError('Scegli una foto JPEG, PNG, WebP, HEIC o HEIF.');
+      return;
+    }
+    if (file.size <= 0 || file.size > FANTASPOSI_AVATAR_MAX_SIZE) {
+      setError('La foto profilo deve essere inferiore a 10 MB.');
+      return;
+    }
+    const nextPreview = URL.createObjectURL(file);
+    setLocalPreview(nextPreview);
+    setBusy(true); setProgress(0); setMessage('Caricamento foto profilo…');
+    try {
+      const createResponse = await fantasyFetch('/api/fantasposi/avatar/create', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, mimeType: file.type, size: file.size }),
+      });
+      if (!createResponse.ok) throw new Error(await responseError(createResponse));
+      const upload = await createResponse.json() as { mediaId: number; uploadUrl: string; method: string };
+      if (!Number.isSafeInteger(upload.mediaId) || !upload.uploadUrl || upload.method !== 'PUT') {
+        throw new Error('Caricamento foto non disponibile.');
+      }
+      await putPhotoProof(upload.uploadUrl, file, setProgress);
+      setMessage('Prepariamo la tua foto…');
+      const completeResponse = await fantasyFetch(`/api/fantasposi/avatar/${upload.mediaId}/complete`, { method: 'POST' });
+      if (!completeResponse.ok) throw new Error(await responseError(completeResponse));
+      const result = await completeResponse.json() as { mediaId: number; avatarUrl: string | null };
+      onAvatarChanged(result.mediaId, result.avatarUrl);
+      setProgress(100);
+      setMessage('Foto aggiornata. La versione ottimizzata arriverà tra poco.');
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Foto profilo non aggiornata. Riprova.');
+      setProgress(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <section className="fantasposi-profile">
+    <p className="fantasposi-kicker">Il tuo profilo</p>
+    <div className="fantasposi-profile__identity">
+      <PlayerAvatar name={displayName} source={localPreview ?? game.player.avatarUrl} eager className="is-profile" />
+      <label className={`fantasposi-avatar-action${busy ? ' is-disabled' : ''}`}>
+        <AppIcon name="camera" />
+        <span>{game.player.avatarMediaId ? 'Cambia foto' : 'Aggiungi foto'}</span>
+        <input type="file" accept={PHOTO_PROOF_ACCEPT} disabled={busy} onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) void uploadAvatar(file);
+        }} />
+      </label>
+    </div>
+    <h1>{displayName}</h1>
+    <TeamBadge team={game.player.team}>Team {teamName}</TeamBadge>
+    <div className="fantasposi-profile__stats">
+      <div><strong>{game.totalPoints}</strong><span>Punti</span></div>
+      <div><strong>{rank ? `${rank}°` : '—'}</strong><span>Posizione</span></div>
+      <div><strong>{game.completedMissionCount}</strong><span>Missioni</span></div>
+    </div>
+    {(message || error) && <div className="fantasposi-profile__upload" aria-live="polite">
+      <p className={error ? 'fantasposi-error' : 'fantasposi-notice'}>{error || message}</p>
+      {busy && progress !== null && <progress max="100" value={progress} aria-label="Caricamento foto profilo" />}
+    </div>}
+    <div className="fantasposi-profile__actions">
+      <button className="fantasposi-primary" type="button" onClick={() => navigate('/fantasposi/come-si-gioca')}>Come si gioca</button>
+      {!install.standalone && <section className="fantasposi-install"><h2>Portalo con te</h2>{install.canInstall ? <button className="fantasposi-secondary" type="button" onClick={() => void install.install()}>Installa FantaSposi</button> : install.isIos ? <p>In Safari scegli Condividi → Aggiungi alla schermata Home.</p> : <p>Puoi installarlo dal menu del browser quando l’opzione è disponibile.</p>}</section>}
+      <button className="fantasposi-text-button" type="button" onClick={() => void onLogout()}>Esci dall’account</button>
+    </div>
+  </section>;
+}
+
+function FantasyHome({
+  game,
+  rank,
+  missions,
+  now,
+  navigate,
+}: {
+  game: BootstrapResponse;
+  rank: number | null;
+  missions: FantasyMission[];
+  now: number;
+  navigate: (path: string) => void;
+}) {
+  const displayName = game.player.displayName || 'Giocatore';
+  const teamName = game.wedding.teams[game.player.team];
+  return <section className="fantasposi-home">
+    <p className="fantasposi-kicker">{game.wedding.brideName} &amp; {game.wedding.groomName} presentano</p>
+    <section className="fantasposi-player-hero">
+      <PlayerAvatar name={displayName} source={game.player.avatarUrl} eager className="is-hero" />
+      <div className="fantasposi-player-hero__copy">
+        <span>Ciao,</span><h1>{displayName}</h1>
+        <TeamBadge team={game.player.team}>Team {teamName}</TeamBadge>
+      </div>
+      <div className="fantasposi-player-hero__phase"><span>Ora</span><strong>{game.currentPhase?.name ?? 'In preparazione'}</strong></div>
+    </section>
+    <div className="fantasposi-scoreboard" aria-label="Il tuo risultato">
+      <div className="is-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong><small>PT</small></div>
+      <div className="is-rank"><span>In classifica</span><strong>{rank ? `#${rank}` : '—'}</strong><small>{rank ? 'continua così' : 'in aggiornamento'}</small></div>
+    </div>
+    <section className="fantasposi-now">
+      <header><div><p className="fantasposi-kicker">Da fare adesso</p><h2>Le tue missioni</h2></div><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></header>
+      {missions.length > 0 ? <div className="fantasposi-now__list">{missions.map((mission) => {
+        const status = effectiveMissionStatus(mission, now);
+        return <button type="button" key={mission.id} className={`is-${status}`} onClick={() => navigate('/fantasposi/missioni')}>
+          <span className="fantasposi-now__icon"><AppIcon name={mission.missionType === 'photo' ? 'camera' : 'spark'} /></span>
+          <span className="fantasposi-now__copy"><small>{status === 'scheduled' ? `Si apre tra ${fantasposiCountdown(mission.opensAt, now) ?? 'poco'}` : mission.missionType === 'photo' ? 'Missione foto' : 'Disponibile ora'}</small><strong>{mission.title}</strong></span>
+          <b>+{mission.points}</b>
+        </button>;
+      })}</div> : <div className="fantasposi-empty"><AppIcon name="spark" /><h3>Un momento di pausa</h3><p>Le prossime missioni arriveranno con la nuova fase.</p></div>}
+    </section>
+    <section className="fantasposi-home__predictions">
+      <header><div><p className="fantasposi-kicker">La tua intuizione</p><h2>Pronostici</h2></div><strong>{game.openPredictionCount}</strong></header>
+      {game.recommendedPredictions.length > 0 ? game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points} pt</span>{prediction.question}</button>) : <p>Nessun pronostico aperto. Goditi la festa.</p>}
+      <button className="fantasposi-text-button" type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button>
+    </section>
+    <div className="fantasposi-home__counts"><div><strong>{game.availableMissionCount}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Conquistate</span></div></div>
+  </section>;
+}
+
 function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLogout: () => Promise<void> }) {
   const [path, setPath] = useState(window.location.pathname.replace(/\/$/, '') || '/fantasposi');
   const [game, setGame] = useState(bootstrap);
@@ -898,6 +1155,7 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   const homeNow = useFantasposiClock(path === '/fantasposi');
   const install = usePwaInstall();
   const [online, setOnline] = useState(navigator.onLine);
+  const [currentRank, setCurrentRank] = useState<number | null>(null);
   useEffect(() => {
     const update = () => setPath(window.location.pathname.replace(/\/$/, '') || '/fantasposi');
     window.addEventListener('popstate', update);
@@ -956,6 +1214,15 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
     const interval = window.setInterval(poll, 60_000);
     return () => window.clearInterval(interval);
   }, [path, refreshBootstrap]);
+
+  useEffect(() => {
+    let mounted = true;
+    fantasyFetch('/api/fantasposi/leaderboard')
+      .then(async (response) => response.ok ? response.json() as Promise<LeaderboardResponse> : null)
+      .then((result) => { if (mounted) setCurrentRank(result?.currentPlayer?.rank ?? null); })
+      .catch(() => undefined);
+    return () => { mounted = false; };
+  }, [leaderboardRefreshKey, game.totalPoints]);
   const teamName = game.wedding.teams[game.player.team];
   const displayName = game.player.displayName || 'Giocatore';
   const homeMissions = game.recommendedMissions
@@ -990,22 +1257,29 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
   } else if (path === '/fantasposi/come-si-gioca') {
     content = <FantasyHowToPlay onBack={() => navigate('/fantasposi/profilo')} />;
   } else if (path === '/fantasposi/profilo') {
-    content = <section className="fantasposi-profile"><p className="fantasposi-kicker">Il tuo profilo</p><div className="fantasposi-avatar" aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</div><h1>{displayName}</h1><p>{teamName}</p><button className="fantasposi-primary" type="button" onClick={() => navigate('/fantasposi/come-si-gioca')}>Come si gioca</button>{!install.standalone && <section className="fantasposi-install"><h2>Installa FantaSposi</h2>{install.canInstall ? <button className="fantasposi-secondary" type="button" onClick={() => void install.install()}>Installa sul dispositivo</button> : install.isIos ? <p>In Safari scegli Condividi → Aggiungi alla schermata Home.</p> : <p>Puoi installarlo dal menu del browser quando l’opzione è disponibile.</p>}</section>}<button className="fantasposi-secondary" type="button" onClick={() => void onLogout()}>Esci</button></section>;
+    content = <FantasyProfile game={game} rank={currentRank} install={install} navigate={navigate} onLogout={onLogout} onAvatarChanged={(mediaId, avatarUrl) => {
+      setGame((current) => ({
+        ...current,
+        player: { ...current.player, avatarMediaId: mediaId, avatarUrl: avatarUrl ?? current.player.avatarUrl },
+      }));
+      window.setTimeout(() => void refreshBootstrap(), 5_000);
+      window.setTimeout(() => void refreshBootstrap(), 15_000);
+    }} />;
   } else {
     content = game.gameState === 'finished'
       ? <FantasyFinalResults refreshKey={leaderboardRefreshKey} />
       : game.gameState === 'setup'
-        ? <section className="fantasposi-placeholder"><span aria-hidden="true">✦</span><h1>Il FantaSposi non è ancora iniziato</h1><p>Il tuo profilo è pronto. Torna qui quando gli sposi daranno il via al gioco.</p></section>
-        : <section className="fantasposi-home"><p className="fantasposi-kicker">FantaSposi · {game.wedding.brideName} &amp; {game.wedding.groomName}</p><h1>Ciao, {displayName}!</h1><div className="fantasposi-home__meta"><span>{teamName}</span><span>Fase: {game.currentPhase?.name ?? 'In preparazione'}</span></div><div className="fantasposi-score"><span>I tuoi punti</span><strong>{game.totalPoints}</strong></div><div className="fantasposi-home__counts"><div><strong>{game.availableMissionCount}</strong><span>Da completare</span></div><div><strong>{game.completedMissionCount}</strong><span>Completate</span></div></div><section className="fantasposi-now"><div><p className="fantasposi-kicker">Missioni da fare adesso</p><button type="button" onClick={() => navigate('/fantasposi/missioni')}>Vedi tutte</button></div>{homeMissions.length > 0 ? homeMissions.map((mission) => { const status = effectiveMissionStatus(mission, homeNow); return <button type="button" key={mission.id} onClick={() => navigate('/fantasposi/missioni')}><span>{status === 'scheduled' ? `Tra ${fantasposiCountdown(mission.opensAt, homeNow) ?? 'poco'}` : `+${mission.points}`}</span><strong>{mission.title}</strong></button>; }) : <p>Nessuna missione disponibile in questo momento.</p>}</section><section className="fantasposi-home__predictions"><div><p className="fantasposi-kicker">Pronostici aperti</p><strong>{game.openPredictionCount}</strong></div>{game.recommendedPredictions.map((prediction) => <button type="button" key={prediction.id} onClick={() => navigate('/fantasposi/pronostici')}><span>+{prediction.points}</span>{prediction.question}</button>)}<button type="button" onClick={() => navigate('/fantasposi/pronostici')}>Vai ai pronostici</button></section></section>;
+        ? <section className="fantasposi-setup"><PlayerAvatar name={displayName} source={game.player.avatarUrl} eager className="is-hero" /><p className="fantasposi-kicker">Tutto pronto, {displayName}</p><h1>Il FantaSposi sta per iniziare</h1><TeamBadge team={game.player.team}>Team {teamName}</TeamBadge><p>Il tuo profilo è pronto. Torna qui quando gli sposi daranno il via al gioco.</p></section>
+        : <FantasyHome game={game} rank={currentRank} missions={homeMissions} now={homeNow} navigate={navigate} />;
   }
 
   return (
     <main className="fantasposi-app">
       {!online && <p className="fantasposi-offline" role="status">Sei offline. Per giocare e aggiornare i risultati serve una connessione.</p>}
-      <header className="fantasposi-topbar"><button type="button" onClick={() => navigate('/fantasposi')}>FantaSposi</button><span>{teamName}</span></header>
+      <header className="fantasposi-topbar"><button type="button" onClick={() => navigate('/fantasposi')}><AppIcon name="spark" />FantaSposi</button><button type="button" className="fantasposi-topbar__profile" aria-label="Apri il profilo" onClick={() => navigate('/fantasposi/profilo')}><PlayerAvatar name={displayName} source={game.player.avatarUrl} eager /><span>{teamName}</span></button></header>
       <div className="fantasposi-app__content">{content}</div>
       <nav className="fantasposi-bottom-nav" aria-label="Navigazione FantaSposi">
-        {routes.map((route) => <a key={route.path} href={route.path} className={path === route.path ? 'is-active' : ''} onClick={(event) => { event.preventDefault(); navigate(route.path); }}><span aria-hidden="true">{route.icon}</span>{route.label}</a>)}
+        {routes.map((route) => <a key={route.path} href={route.path} className={path === route.path ? 'is-active' : ''} onClick={(event) => { event.preventDefault(); navigate(route.path); }}><AppIcon name={route.icon} />{route.label}</a>)}
       </nav>
     </main>
   );
@@ -1060,7 +1334,7 @@ export function FantasposiApp() {
     setState({ status: 'anonymous' });
   };
 
-  if (state.status === 'loading') return <main className="fantasposi-entry"><p>Prepariamo FantaSposi…</p></main>;
+  if (state.status === 'loading') return <main className="fantasposi-entry"><FantasySkeleton /></main>;
   if (state.status === 'anonymous') return <FantasyLogin onAuthenticated={loadAuthenticatedState} />;
   if (state.status === 'onboarding') return <FantasyOnboarding me={state.me} onCompleted={loadAuthenticatedState} />;
   if (state.status === 'inactive') return <main className="fantasposi-entry"><section className="fantasposi-entry__panel"><h1>Accesso non attivo</h1><p>La tua partecipazione a questo FantaSposi non è attiva.</p><button className="fantasposi-secondary" type="button" onClick={() => void logout()}>Esci</button></section></main>;

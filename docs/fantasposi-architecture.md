@@ -286,3 +286,41 @@ Supabase, URL firmati, upload e Realtime non sono mai messi in cache. Non esiste
 completion offline né background sync; offline viene mostrato un messaggio
 esplicito. La sessione Supabase resta nella persistenza browser già esistente e
 il routing OAuth/OTP non viene modificato.
+
+## Player avatar
+
+La foto profilo appartiene a `fantasposi_players`, non al profilo Supabase
+globale: lo stesso utente può quindi avere un avatar diverso in ogni matrimonio.
+`avatar_media_id` è nullable e usa una foreign key composita con `wedding_id`
+verso `media(id, wedding_id)`. Il source dedicato è `fantasposi_avatar`.
+
+Il Worker genera sempre il namespace R2 senza dati personali:
+
+`weddings/{wedding-slug}/fantasposi/avatars/{player-id}/originals/{uuid}.{ext}`
+
+Il flusso autenticato è create, PUT firmata, complete e Queue preview. Il client
+non invia wedding, player, user o object key come autorità. Complete verifica
+player attivo, wedding corrente, uploader, source, prefisso, MIME, esistenza R2
+e dimensione, quindi assegna il nuovo media al player e avvia la normale preview
+WebP. L'avatar viene servito soltanto dalla thumbnail tramite endpoint
+autenticato e wedding-scoped; gli originali non sono usati nella UI.
+
+`fantasposi_avatar` e `fantasposi_proof` sono media privati del gioco: restano
+esclusi da gallery pubblica, moderazione, statistiche e delete-all WeddingHub.
+Sostituire un avatar può lasciare il precedente media non referenziato: non si
+simula una transazione tra PostgreSQL e R2; il cleanup idempotente degli orphan
+è una manutenzione futura.
+
+## Design system player
+
+Il player usa token CSS isolati sotto `.fantasposi-app` e `.fantasposi-entry`:
+ivory caldo, surface, ink/muted, verde botanico, accento champagne e una coppia
+desaturata bride/groom. Radius, ombre e motion sono centralizzati nello stesso
+scope, senza alterare il sito pubblico o l'admin. La tipografia riusa il display
+serif e la sans UI del tema corrente; le icone sono SVG inline accessibili.
+
+La shell resta una product experience mobile centrata anche su desktop, con
+bottom navigation safe-area, target touch da almeno 44 px, avatar lazy-loaded,
+skeleton stabili e motion CSS disattivata con `prefers-reduced-motion`. Home,
+missioni, pronostici, classifica, profilo, setup e finale condividono gli stessi
+token, mentre la logica gameplay e Realtime resta invariata.

@@ -6,13 +6,17 @@ import {
   isValidFantasposiResetConfirmation,
   effectivePredictionStatus,
   isPhotoProofOriginalKey,
+  isPlayerAvatarOriginalKey,
+  isOwnedPlayerAvatarMedia,
   isValidTimeWindow,
   missionRequiresPhotoProof,
   parseOptionalTimestamp,
   parsePhotoProofCreateInput,
+  parseAvatarCreateInput,
   parsePhotoProofMediaId,
   parsePositiveInteger,
   photoProofPrefix,
+  playerAvatarPrefix,
   selectHomeMissionRecommendations,
   type RecommendedMissionCandidate,
 } from './fantasposi-domain';
@@ -217,5 +221,35 @@ describe('Photo Proof validation', () => {
     expect(missionRequiresPhotoProof('photo')).toBe(true);
     expect(missionRequiresPhotoProof('action')).toBe(false);
     expect(missionRequiresPhotoProof('social')).toBe(false);
+  });
+
+  it('validates avatar uploads with a dedicated 10 MB limit', () => {
+    expect(parseAvatarCreateInput({ filename: 'avatar.jpg', mimeType: 'image/jpeg', size: 1024 }).value)
+      .toEqual({ filename: 'avatar.jpg', mimeType: 'image/jpeg', size: 1024 });
+    expect(parseAvatarCreateInput({
+      filename: 'avatar.jpg', mimeType: 'image/jpeg', size: 10 * 1024 * 1024 + 1,
+    })).toEqual({ value: null, invalidField: 'maxSize' });
+    expect(parseAvatarCreateInput({ filename: 'avatar.mp4', mimeType: 'video/mp4', size: 1024 }))
+      .toEqual({ value: null, invalidField: 'mimeType' });
+  });
+
+  it('isolates avatar keys by wedding and player without personal data', () => {
+    const prefix = playerAvatarPrefix('test-wedding', 42);
+    expect(prefix).toBe('weddings/test-wedding/fantasposi/avatars/42/originals/');
+    expect(isPlayerAvatarOriginalKey(`${prefix}uuid.webp`, 'test-wedding', 42)).toBe(true);
+    expect(isPlayerAvatarOriginalKey(`${prefix}uuid.webp`, 'other-wedding', 42)).toBe(false);
+    expect(isPlayerAvatarOriginalKey(`${prefix}uuid.webp`, 'test-wedding', 41)).toBe(false);
+  });
+
+  it.each([
+    [{ weddingId: 8, uploaderUserId: 'user-a', source: 'fantasposi_avatar', originalKey: 'weddings/test-wedding/fantasposi/avatars/42/originals/a.jpg' }, true],
+    [{ weddingId: 9, uploaderUserId: 'user-a', source: 'fantasposi_avatar', originalKey: 'weddings/test-wedding/fantasposi/avatars/42/originals/a.jpg' }, false],
+    [{ weddingId: 8, uploaderUserId: 'user-b', source: 'fantasposi_avatar', originalKey: 'weddings/test-wedding/fantasposi/avatars/42/originals/a.jpg' }, false],
+    [{ weddingId: 8, uploaderUserId: 'user-a', source: 'fantasposi_proof', originalKey: 'weddings/test-wedding/fantasposi/avatars/42/originals/a.jpg' }, false],
+    [{ weddingId: 8, uploaderUserId: 'user-a', source: 'fantasposi_avatar', originalKey: 'weddings/other/fantasposi/avatars/42/originals/a.jpg' }, false],
+  ])('validates avatar ownership %#', (media, expectedResult) => {
+    expect(isOwnedPlayerAvatarMedia(media, {
+      weddingId: 8, userId: 'user-a', weddingSlug: 'test-wedding', playerId: 42,
+    })).toBe(expectedResult);
   });
 });

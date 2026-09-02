@@ -5086,3 +5086,638 @@ body[data-nav-open='true'] .site-header--overlay .site-mark span {
     }
   }
 }
+
+/* FantaSposi Product Redesign V1 */
+.fantasposi-entry,
+.fantasposi-app {
+  --fs-bg: #f7f8f1;
+  --fs-surface: #fffdf8;
+  --fs-surface-soft: #eef1e7;
+  --fs-text: #1f2921;
+  --fs-muted: #687068;
+  --fs-border: #dfe3d8;
+  --fs-primary: #526b56;
+  --fs-primary-contrast: #fffdf8;
+  --fs-accent: #c69043;
+  --fs-success: #4f765d;
+  --fs-warning: #9b6a2c;
+  --fs-danger: #9a4f4b;
+  --fs-bride: #846d78;
+  --fs-groom: #607970;
+  --fs-radius-sm: 0.75rem;
+  --fs-radius: 1.2rem;
+  --fs-radius-lg: 1.75rem;
+  --fs-shadow: 0 0.75rem 2rem rgba(49, 61, 50, 0.08);
+  --fs-shadow-raised: 0 1rem 2.8rem rgba(49, 61, 50, 0.12);
+  --fs-motion: 180ms;
+  color: var(--fs-text);
+  background:
+    radial-gradient(circle at 98% 0%, rgba(198, 144, 67, 0.1), transparent 18rem),
+    radial-gradient(circle at 0% 24rem, rgba(82, 107, 86, 0.11), transparent 20rem),
+    var(--fs-bg);
+}
+
+.fantasposi-app {
+  min-width: 0;
+  padding-bottom: calc(6.6rem + env(safe-area-inset-bottom));
+  overflow-x: clip;
+}
+
+.fantasposi-app button,
+.fantasposi-entry button,
+.fantasposi-app a,
+.fantasposi-entry a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fantasposi-app button:focus-visible,
+.fantasposi-app a:focus-visible,
+.fantasposi-entry button:focus-visible,
+.fantasposi-entry input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--fs-accent) 65%, transparent);
+  outline-offset: 3px;
+}
+
+.fantasposi-entry__panel {
+  overflow: hidden;
+  border-color: var(--fs-border);
+  border-radius: var(--fs-radius-lg);
+  background: color-mix(in srgb, var(--fs-surface) 94%, transparent);
+  box-shadow: var(--fs-shadow-raised);
+}
+
+.fantasposi-entry__panel h1,
+.fantasposi-entry__panel h2 {
+  color: var(--fs-text);
+}
+
+.fantasposi-entry input,
+.fantasposi-field input {
+  border-color: var(--fs-border);
+  border-radius: var(--fs-radius-sm);
+  background: var(--fs-surface);
+}
+
+.fantasposi-primary,
+.fantasposi-secondary,
+.fantasposi-text-button {
+  border-radius: var(--fs-radius-sm);
+}
+
+.fantasposi-primary { border-color: var(--fs-primary); background: var(--fs-primary); }
+.fantasposi-secondary { border-color: var(--fs-primary); color: var(--fs-primary); }
+.fantasposi-team-choice button { border-color: var(--fs-border); border-radius: var(--fs-radius); background: var(--fs-surface); }
+.fantasposi-team-choice button.is-selected { border-color: var(--fs-primary); background: var(--fs-surface-soft); box-shadow: inset 0 0 0 1px var(--fs-primary); }
+.fantasposi-steps { border-radius: 999px; background: var(--fs-border); }
+.fantasposi-steps span { background: var(--fs-primary); }
+
+.fantasposi-icon {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+
+.fantasposi-app__content {
+  width: min(100%, 35rem);
+  min-width: 0;
+  padding: 1.6rem 1rem 2.5rem;
+}
+
+.fantasposi-topbar {
+  min-height: calc(4.15rem + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
+  border-color: color-mix(in srgb, var(--fs-border) 78%, transparent);
+  background: color-mix(in srgb, var(--fs-bg) 88%, transparent);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.fantasposi-topbar > button:first-child {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fs-text);
+  font-size: 1.35rem;
+}
+
+.fantasposi-topbar > button:first-child .fantasposi-icon {
+  color: var(--fs-accent);
+}
+
+.fantasposi-topbar .fantasposi-topbar__profile {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fs-primary);
+  font-family: var(--font-body);
+}
+
+.fantasposi-topbar__profile .fantasposi-player-avatar {
+  width: 2rem;
+}
+
+.fantasposi-topbar__profile > span:last-child {
+  display: none;
+}
+
+.fantasposi-bottom-nav {
+  right: max(0.7rem, env(safe-area-inset-right));
+  bottom: max(0.7rem, env(safe-area-inset-bottom));
+  left: max(0.7rem, env(safe-area-inset-left));
+  border: 1px solid color-mix(in srgb, var(--fs-border) 82%, transparent);
+  border-radius: 1.35rem;
+  padding: 0.35rem;
+  background: color-mix(in srgb, var(--fs-surface) 92%, transparent);
+  box-shadow: var(--fs-shadow-raised);
+  backdrop-filter: blur(20px) saturate(130%);
+}
+
+.fantasposi-bottom-nav a {
+  min-height: 3.75rem;
+  gap: 0.25rem;
+  border-radius: 1rem;
+  color: var(--fs-muted);
+  font-size: clamp(0.53rem, 2.25vw, 0.64rem);
+  transition: color var(--fs-motion) ease, background-color var(--fs-motion) ease, transform var(--fs-motion) ease;
+}
+
+.fantasposi-bottom-nav a .fantasposi-icon {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.fantasposi-bottom-nav a.is-active {
+  color: var(--fs-primary);
+  background: var(--fs-surface-soft);
+}
+
+.fantasposi-bottom-nav a:active {
+  transform: scale(0.96);
+}
+
+.fantasposi-kicker {
+  color: var(--fs-primary);
+  font-size: 0.67rem;
+  letter-spacing: 0.17em;
+}
+
+.fantasposi-player-avatar {
+  position: relative;
+  display: grid;
+  width: 3rem;
+  aspect-ratio: 1;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 2px solid color-mix(in srgb, var(--fs-accent) 50%, var(--fs-surface));
+  border-radius: 50%;
+  color: var(--fs-primary);
+  background: linear-gradient(145deg, var(--fs-surface), var(--fs-surface-soft));
+  font: 650 1rem/1 var(--font-display);
+}
+
+.fantasposi-player-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fantasposi-player-avatar.is-hero {
+  width: clamp(5.4rem, 24vw, 7rem);
+  border-width: 3px;
+  box-shadow: 0 0 0 0.4rem rgba(255, 253, 248, 0.62), var(--fs-shadow);
+  font-size: 2rem;
+}
+
+.fantasposi-player-avatar.is-profile {
+  width: 7.5rem;
+  font-size: 2.4rem;
+}
+
+.fantasposi-team-badge {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 1.8rem;
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.35rem 0.68rem;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fantasposi-team-badge.is-bride { color: var(--fs-bride); background: color-mix(in srgb, var(--fs-bride) 8%, var(--fs-surface)); }
+.fantasposi-team-badge.is-groom { color: var(--fs-groom); background: color-mix(in srgb, var(--fs-groom) 8%, var(--fs-surface)); }
+
+.fantasposi-player-hero {
+  display: grid;
+  position: relative;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.2rem;
+  margin-top: 0.8rem;
+  overflow: hidden;
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius-lg);
+  padding: 1.35rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(198, 144, 67, 0.18), transparent 10rem),
+    var(--fs-surface);
+  box-shadow: var(--fs-shadow);
+}
+
+.fantasposi-player-hero::after {
+  position: absolute;
+  right: -1.8rem;
+  bottom: -2.8rem;
+  width: 8rem;
+  height: 8rem;
+  border: 1px solid rgba(82, 107, 86, 0.14);
+  border-radius: 50%;
+  content: '';
+}
+
+.fantasposi-player-hero__copy {
+  min-width: 0;
+  align-self: center;
+}
+
+.fantasposi-player-hero__copy > span {
+  color: var(--fs-muted);
+  font-size: 0.8rem;
+}
+
+.fantasposi-player-hero__copy h1 {
+  max-width: 100%;
+  overflow: hidden;
+  margin: 0.1rem 0 0.65rem;
+  font: 650 clamp(2.1rem, 10vw, 3.3rem)/0.88 var(--font-display);
+  text-overflow: ellipsis;
+}
+
+.fantasposi-player-hero__phase {
+  display: flex;
+  z-index: 1;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--fs-border);
+  padding-top: 0.9rem;
+  color: var(--fs-muted);
+  font-size: 0.72rem;
+}
+
+.fantasposi-player-hero__phase strong { color: var(--fs-primary); }
+
+.fantasposi-scoreboard {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 0.75rem;
+  margin: 0.85rem 0 2rem;
+}
+
+.fantasposi-scoreboard > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius);
+  padding: 1rem;
+  background: var(--fs-surface);
+}
+
+.fantasposi-scoreboard span {
+  grid-column: 1 / -1;
+  color: var(--fs-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fantasposi-scoreboard strong {
+  margin-top: 0.4rem;
+  color: var(--fs-primary);
+  font: 700 clamp(2.4rem, 12vw, 3.6rem)/0.82 var(--font-display);
+}
+
+.fantasposi-scoreboard small {
+  color: var(--fs-muted);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
+.fantasposi-scoreboard .is-score { background: var(--fs-primary); border-color: var(--fs-primary); }
+.fantasposi-scoreboard .is-score span,
+.fantasposi-scoreboard .is-score strong,
+.fantasposi-scoreboard .is-score small { color: var(--fs-primary-contrast); }
+
+.fantasposi-now,
+.fantasposi-home__predictions {
+  margin-top: 2rem;
+}
+
+.fantasposi-now > header,
+.fantasposi-home__predictions > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.fantasposi-now h2,
+.fantasposi-home__predictions h2 {
+  margin: 0.15rem 0 0;
+  font: 650 2rem/1 var(--font-display);
+}
+
+.fantasposi-now > header > button {
+  min-height: 2.75rem;
+  border: 0;
+  padding: 0.5rem;
+  color: var(--fs-primary);
+  background: transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fantasposi-now__list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.fantasposi-now__list > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  min-height: 5.6rem;
+  align-items: center;
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius);
+  padding: 0.9rem;
+  color: var(--fs-text);
+  background: var(--fs-surface);
+  box-shadow: 0 0.3rem 1.2rem rgba(49, 61, 50, 0.05);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--fs-motion) ease, box-shadow var(--fs-motion) ease;
+}
+
+.fantasposi-now__list > button:active { transform: scale(0.985); }
+.fantasposi-now__list > button.is-scheduled { opacity: 0.72; box-shadow: none; }
+
+.fantasposi-now__icon {
+  display: grid;
+  width: 2.65rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--fs-primary);
+  background: var(--fs-surface-soft);
+}
+
+.fantasposi-now__copy { display: grid; gap: 0.25rem; min-width: 0; }
+.fantasposi-now__copy small { color: var(--fs-muted); font-size: 0.67rem; }
+.fantasposi-now__copy strong { overflow: hidden; font: 650 1.25rem/1.05 var(--font-display); text-overflow: ellipsis; }
+.fantasposi-now__list > button > b { color: var(--fs-accent); font-size: 0.75rem; white-space: nowrap; }
+
+.fantasposi-empty {
+  display: grid;
+  justify-items: center;
+  border: 1px dashed var(--fs-border);
+  border-radius: var(--fs-radius);
+  padding: 2rem 1rem;
+  color: var(--fs-muted);
+  background: color-mix(in srgb, var(--fs-surface) 72%, transparent);
+  text-align: center;
+}
+.fantasposi-empty .fantasposi-icon { color: var(--fs-accent); }
+.fantasposi-empty h3 { margin: 0.7rem 0 0.25rem; font: 650 1.4rem/1 var(--font-display); color: var(--fs-text); }
+.fantasposi-empty p { margin: 0; font-size: 0.8rem; }
+
+.fantasposi-home__predictions {
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius-lg);
+  padding: 1.15rem;
+  background: color-mix(in srgb, var(--fs-surface-soft) 62%, var(--fs-surface));
+}
+
+.fantasposi-home__predictions > header > strong {
+  display: grid;
+  min-width: 2.2rem;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--fs-primary-contrast);
+  background: var(--fs-primary);
+}
+
+.fantasposi-home__predictions > button:not(.fantasposi-text-button) {
+  display: flex;
+  width: 100%;
+  min-height: 3.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  border: 0;
+  border-top: 1px solid var(--fs-border);
+  padding: 0.85rem 0;
+  color: var(--fs-text);
+  background: transparent;
+  font: 600 0.86rem/1.3 var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.fantasposi-home__predictions > button > span { color: var(--fs-accent); font-weight: 750; white-space: nowrap; }
+.fantasposi-home__predictions > p { color: var(--fs-muted); font-size: 0.82rem; }
+
+.fantasposi-home__counts,
+.fantasposi-profile__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius);
+  background: var(--fs-border);
+}
+
+.fantasposi-home__counts > div,
+.fantasposi-profile__stats > div {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem;
+  background: var(--fs-surface);
+  text-align: center;
+}
+.fantasposi-home__counts strong,
+.fantasposi-profile__stats strong { color: var(--fs-primary); font: 700 1.6rem/1 var(--font-display); }
+.fantasposi-home__counts span,
+.fantasposi-profile__stats span { color: var(--fs-muted); font-size: 0.65rem; }
+
+.fantasposi-missions,
+.fantasposi-predictions,
+.fantasposi-leaderboard,
+.fantasposi-profile,
+.fantasposi-final,
+.fantasposi-how-to,
+.fantasposi-setup { width: 100%; min-width: 0; }
+
+.fantasposi-missions > h1,
+.fantasposi-predictions > h1,
+.fantasposi-leaderboard > h1,
+.fantasposi-profile > h1,
+.fantasposi-how-to > h1 {
+  margin: 0.25rem 0 1.5rem;
+  font: 650 clamp(2.6rem, 13vw, 4rem)/0.9 var(--font-display);
+}
+
+.fantasposi-mission-list,
+.fantasposi-prediction-list { gap: 0.9rem; }
+
+.fantasposi-mission,
+.fantasposi-prediction {
+  border-color: var(--fs-border);
+  border-radius: var(--fs-radius-lg);
+  padding: 1.15rem;
+  background: var(--fs-surface);
+  box-shadow: 0 0.45rem 1.4rem rgba(49, 61, 50, 0.055);
+}
+
+.fantasposi-mission > div:first-child > p {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.fantasposi-mission > div:first-child .fantasposi-icon { width: 1rem; height: 1rem; }
+.fantasposi-mission h2,
+.fantasposi-prediction h2 { font-size: clamp(1.6rem, 8vw, 2.15rem); }
+.fantasposi-mission button,
+.fantasposi-mission__photo-button,
+.fantasposi-prediction > button { min-height: 3.2rem; border-radius: var(--fs-radius-sm); }
+.fantasposi-mission__photo-button { display: flex; align-items: center; justify-content: center; gap: 0.55rem; }
+.fantasposi-mission.is-available { border-color: color-mix(in srgb, var(--fs-primary) 45%, var(--fs-border)); }
+.fantasposi-mission.is-completed { background: color-mix(in srgb, var(--fs-success) 7%, var(--fs-surface)); }
+.fantasposi-mission.is-completed > small { color: var(--fs-success); font-weight: 700; }
+.fantasposi-mission__proof { border-radius: var(--fs-radius-sm); overflow: hidden; }
+
+.fantasposi-prediction fieldset label { min-height: 3.4rem; border-radius: var(--fs-radius-sm); }
+.fantasposi-prediction fieldset label.is-selected { border-color: var(--fs-primary); background: var(--fs-surface-soft); }
+
+.fantasposi-team-score {
+  border-radius: var(--fs-radius-lg);
+  background: var(--fs-surface);
+  box-shadow: var(--fs-shadow);
+}
+.fantasposi-team-score article:first-child { background: color-mix(in srgb, var(--fs-bride) 8%, var(--fs-surface)); }
+.fantasposi-team-score article:nth-child(2) { background: color-mix(in srgb, var(--fs-groom) 8%, var(--fs-surface)); }
+
+.fantasposi-podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 0.45rem;
+  margin: 1.4rem 0 2rem;
+  padding: 0;
+  list-style: none;
+}
+
+.fantasposi-podium li {
+  display: grid;
+  position: relative;
+  min-width: 0;
+  justify-items: center;
+  gap: 0.38rem;
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius) var(--fs-radius) 0.55rem 0.55rem;
+  padding: 1rem 0.35rem 0.75rem;
+  background: var(--fs-surface);
+  text-align: center;
+}
+.fantasposi-podium li.is-place-1 { grid-column: 2; grid-row: 1; min-height: 12rem; border-color: color-mix(in srgb, var(--fs-accent) 55%, var(--fs-border)); }
+.fantasposi-podium li.is-place-2 { grid-column: 1; grid-row: 1; min-height: 10.3rem; }
+.fantasposi-podium li.is-place-3 { grid-column: 3; grid-row: 1; min-height: 9.4rem; }
+.fantasposi-podium li.is-current { box-shadow: inset 0 0 0 2px var(--fs-primary); }
+.fantasposi-podium__place { position: absolute; top: -0.65rem; display: grid; width: 1.7rem; aspect-ratio: 1; place-items: center; border-radius: 50%; color: var(--fs-surface); background: var(--fs-accent); font-weight: 800; }
+.fantasposi-podium .fantasposi-player-avatar { width: clamp(3rem, 13vw, 4.25rem); }
+.fantasposi-podium strong { max-width: 100%; overflow: hidden; font: 650 1rem/1 var(--font-display); text-overflow: ellipsis; white-space: nowrap; }
+.fantasposi-podium b { color: var(--fs-primary); font-size: 0.75rem; }
+.fantasposi-podium .fantasposi-team-badge { max-width: 100%; overflow: hidden; padding: 0.25rem 0.4rem; font-size: 0.48rem; text-overflow: ellipsis; white-space: nowrap; }
+
+.fantasposi-ranking { border-radius: var(--fs-radius-lg); overflow: hidden; background: var(--fs-surface); }
+.fantasposi-ranking li { grid-template-columns: 1.6rem 2.7rem minmax(0, 1fr) auto; min-height: 4.7rem; padding: 0.65rem 0.8rem; }
+.fantasposi-ranking li.is-current { background: color-mix(in srgb, var(--fs-primary) 10%, var(--fs-surface)); box-shadow: inset 3px 0 var(--fs-primary); }
+.fantasposi-ranking .fantasposi-player-avatar { width: 2.6rem; }
+
+.fantasposi-profile { align-content: start; padding-top: 0.6rem; }
+.fantasposi-profile__identity { display: grid; position: relative; justify-items: center; margin: 0.8rem 0 1rem; }
+.fantasposi-avatar-action { display: inline-flex; min-height: 2.65rem; align-items: center; gap: 0.45rem; margin-top: -1rem; border: 1px solid var(--fs-border); border-radius: 999px; padding: 0.55rem 0.8rem; color: var(--fs-primary); background: var(--fs-surface); box-shadow: var(--fs-shadow); font-size: 0.68rem; font-weight: 750; cursor: pointer; }
+.fantasposi-avatar-action input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.fantasposi-avatar-action.is-disabled { opacity: 0.55; pointer-events: none; }
+.fantasposi-avatar-action .fantasposi-icon { width: 1rem; height: 1rem; }
+.fantasposi-profile > h1 { max-width: 100%; margin-bottom: 0.65rem; }
+.fantasposi-profile__stats { width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 1.5rem 0; }
+.fantasposi-profile__upload { width: 100%; }
+.fantasposi-profile__upload progress { width: 100%; accent-color: var(--fs-primary); }
+.fantasposi-profile__actions { display: grid; width: 100%; gap: 0.7rem; }
+.fantasposi-profile__actions .fantasposi-primary { width: 100%; margin: 0; border-radius: var(--fs-radius-sm); }
+.fantasposi-profile__actions .fantasposi-install { width: 100%; border: 1px solid var(--fs-border); border-radius: var(--fs-radius); margin: 0; padding: 1rem; background: var(--fs-surface); }
+
+.fantasposi-setup {
+  display: grid;
+  min-height: 68svh;
+  align-content: center;
+  justify-items: center;
+  gap: 0.85rem;
+  text-align: center;
+}
+.fantasposi-setup h1 { max-width: 10ch; margin: 0; font: 650 clamp(3rem, 14vw, 4.7rem)/0.88 var(--font-display); }
+.fantasposi-setup > p:last-child { max-width: 28rem; color: var(--fs-muted); line-height: 1.65; }
+
+.fantasposi-final { text-align: center; }
+.fantasposi-final__personal { border: 1px solid var(--fs-border); border-radius: var(--fs-radius-lg); padding: 1.2rem; background: var(--fs-surface); }
+.fantasposi-final__podium li { grid-template-columns: 1.5rem 2.5rem minmax(0, 1fr) auto; align-items: center; text-align: left; }
+.fantasposi-final__podium .fantasposi-player-avatar { width: 2.4rem; }
+
+.fantasposi-skeleton {
+  display: grid;
+  min-height: 60svh;
+  align-content: center;
+  gap: 0.8rem;
+}
+.fantasposi-skeleton span { display: block; height: 4.5rem; border-radius: var(--fs-radius); background: linear-gradient(100deg, var(--fs-surface-soft) 30%, var(--fs-surface) 48%, var(--fs-surface-soft) 66%); background-size: 250% 100%; animation: fantasposi-shimmer 1.5s infinite linear; }
+.fantasposi-skeleton span:first-child { width: 62%; height: 2.5rem; }
+.fantasposi-skeleton span:nth-child(2) { height: 8rem; }
+
+@keyframes fantasposi-shimmer { to { background-position-x: -250%; } }
+
+@media (min-width: 30rem) {
+  .fantasposi-app__content { padding-inline: 1.35rem; }
+  .fantasposi-player-hero { padding: 1.6rem; }
+  .fantasposi-topbar__profile > span:last-child { display: inline; }
+}
+
+@media (min-width: 48rem) {
+  .fantasposi-app__content { padding-top: 2.4rem; }
+  .fantasposi-bottom-nav { right: max(1rem, calc((100vw - 35rem) / 2)); left: max(1rem, calc((100vw - 35rem) / 2)); }
+  .fantasposi-now__list > button:hover { transform: translateY(-2px); box-shadow: var(--fs-shadow); }
+}
+
+@media (max-width: 23rem) {
+  .fantasposi-app__content { padding-inline: 0.75rem; }
+  .fantasposi-bottom-nav { right: 0.35rem; left: 0.35rem; }
+  .fantasposi-bottom-nav a { font-size: 0.5rem; }
+  .fantasposi-scoreboard { grid-template-columns: 1fr 0.9fr; gap: 0.5rem; }
+  .fantasposi-scoreboard > div { padding: 0.75rem; }
+  .fantasposi-player-hero { gap: 0.8rem; padding: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fantasposi-bottom-nav a,
+  .fantasposi-now__list > button { transition: none; }
+  .fantasposi-skeleton span { animation: none; }
+}

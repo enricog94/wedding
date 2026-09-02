@@ -2,16 +2,20 @@ import type { Database } from '../lib/supabase-db';
 import type { WeddingResolution } from '../lib/wedding-resolver';
 import {
   fantasposiMutationBlock,
+  isOwnedPlayerAvatarMedia,
   isPhotoProofOriginalKey,
   missionRequiresPhotoProof,
   parsePhotoProofCreateInput,
+  parseAvatarCreateInput,
   parsePhotoProofMediaId,
   parsePositiveInteger,
   photoProofPrefix,
+  playerAvatarPrefix,
   selectHomeMissionRecommendations,
   type FantasposiGameState,
 } from '../lib/fantasposi-domain';
 import {
+  FANTASPOSI_AVATAR_SOURCE,
   FANTASPOSI_PROOF_SOURCE,
   MEDIA_TYPES,
   isSupportedImageMimeType,
@@ -49,7 +53,8 @@ type PlayerRow = {
   wedding_id: number | null;
   user_id: string;
   display_name: string | null;
-  avatar_url: string | null;
+  avatar_media_id: number | null;
+  avatar_preview_status: string | null;
   team: 'bride' | 'groom' | null;
   onboarding_completed: boolean | null;
   active: boolean | null;
@@ -128,6 +133,10 @@ type ProofMediaRow = {
   uploaded_at: string | null;
 };
 
+type AvatarMediaRow = ProofMediaRow & {
+  thumbnail_key: string | null;
+};
+
 type LeaderboardRow = {
   player_id: number;
   display_name: string;
@@ -138,6 +147,8 @@ type LeaderboardRow = {
   completed_missions: number;
   team_points: number;
   team_players: number;
+  avatar_media_id: number | null;
+  avatar_preview_status: string | null;
 };
 
 type PredictionRow = {
@@ -226,14 +237,24 @@ async function playerForUser(
   userId: string,
 ): Promise<PlayerRow | null> {
   return env.DB.prepare(
-    `SELECT fp.id, fp.wedding_id, p.user_id, p.display_name, p.avatar_url,
+    `SELECT fp.id, fp.wedding_id, p.user_id, p.display_name,
+            fp.avatar_media_id, avatar.preview_status AS avatar_preview_status,
             fp.team, fp.onboarding_completed, fp.active, fp.joined_at
      FROM profiles p
      LEFT JOIN fantasposi_players fp
        ON fp.user_id = p.user_id AND fp.wedding_id = ?
+     LEFT JOIN media avatar
+       ON avatar.id = fp.avatar_media_id AND avatar.wedding_id = fp.wedding_id
+      AND avatar.source = 'fantasposi_avatar'
      WHERE p.user_id = ?
      LIMIT 1`,
   ).bind(weddingId, userId).first<PlayerRow>();
+}
+
+function playerAvatarUrl(player: Pick<PlayerRow, 'avatar_media_id' | 'avatar_preview_status'>): string | null {
+  return player.avatar_media_id && player.avatar_preview_status === 'ready'
+    ? `/api/fantasposi/avatar/${player.avatar_media_id}`
+    : null;
 }
 
 function serializeWedding(wedding: WeddingRow) {
@@ -256,7 +277,8 @@ function serializePlayer(player: PlayerRow | null) {
     id: player.id,
     userId: player.user_id,
     displayName: player.display_name,
-    avatarUrl: player.avatar_url,
+    avatarMediaId: player.avatar_media_id,
+    avatarUrl: playerAvatarUrl(player),
     team: player.team,
     onboardingCompleted: player.onboarding_completed === true,
     active: player.active === true,
@@ -571,7 +593,7 @@ async function meResponse(request: Request, env: FantasposiEnv): Promise<Respons
       id: resolved.user.id,
       email: resolved.user.email,
       displayName: player?.display_name ?? null,
-      avatarUrl: player?.avatar_url ?? null,
+      avatarUrl: player ? playerAvatarUrl(player) : null,
     },
     wedding: serializeWedding(resolved.wedding),
     membership: serializedPlayer,
@@ -724,20 +746,24 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
      ), player_totals AS (
        SELECT player.id AS player_id,
               COALESCE(NULLIF(BTRIM(profile.display_name), ''), 'Giocatore') AS display_name,
-              player.team,
+              player.team, player.avatar_media_id,
+              avatar.preview_status AS avatar_preview_status,
               COALESCE(mission.points, 0)::integer AS mission_points,
               COALESCE(prediction.points, 0)::integer AS prediction_points,
               (COALESCE(mission.points, 0) + COALESCE(prediction.points, 0))::integer AS points,
               COALESCE(mission.completed_missions, 0)::integer AS completed_missions
        FROM fantasposi_players player
        LEFT JOIN profiles profile ON profile.user_id = player.user_id
+       LEFT JOIN media avatar
+         ON avatar.id = player.avatar_media_id AND avatar.wedding_id = player.wedding_id
+        AND avatar.source = 'fantasposi_avatar'
        LEFT JOIN mission_totals mission ON mission.player_id = player.id
        LEFT JOIN prediction_totals prediction ON prediction.player_id = player.id
        WHERE player.wedding_id = ?
          AND player.active = true
      )
-     SELECT player_id, display_name, team, mission_points, prediction_points,
-            points, completed_missions,
+     SELECT player_id, display_name, team, avatar_media_id, avatar_preview_status,
+            mission_points, prediction_points, points, completed_missions,
             SUM(points) OVER (PARTITION BY team)::integer AS team_points,
             COUNT(*) OVER (PARTITION BY team)::integer AS team_players
      FROM player_totals
@@ -754,6 +780,9 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
     completedMissions: player.completed_missions,
     rank: index + 1,
     isCurrentUser: player.player_id === currentPlayer.id,
+    avatarUrl: player.avatar_media_id && player.avatar_preview_status === 'ready'
+      ? `/api/fantasposi/avatar/${player.avatar_media_id}`
+      : null,
   }));
   const current = players.find((player) => player.isCurrentUser);
   const brideTeam = result.results.find((player) => player.team === 'bride');
@@ -946,6 +975,155 @@ async function completePhotoProofUploadResponse(
 
   if (media.preview_status !== 'ready') await services.enqueueMediaPreview(media.id);
   return json({ mediaId: media.id, status: 'pending' });
+}
+
+async function createPlayerAvatarResponse(
+  request: Request,
+  env: FantasposiEnv,
+  services: FantasposiMediaServices,
+): Promise<Response> {
+  const resolved = await context(request, env);
+  if (!resolved.ok) return resolved.response;
+  const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
+  if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  let input: unknown;
+  try {
+    input = await request.json();
+  } catch {
+    return json({ error: 'Invalid JSON body' }, 400);
+  }
+  const parsed = parseAvatarCreateInput(input);
+  if (!parsed.value) {
+    const errors = {
+      payload: 'JSON body must be an object',
+      filename: 'Filename is required',
+      mimeType: 'Seleziona una foto JPEG, PNG, WebP, HEIC o HEIF.',
+      size: 'La foto deve avere una dimensione valida.',
+      maxSize: 'La foto profilo non può superare 10 MB.',
+    } as const;
+    return json({ error: errors[parsed.invalidField] }, 400);
+  }
+
+  const { filename, mimeType, size } = parsed.value;
+  const uuid = crypto.randomUUID();
+  const originalKey = `${playerAvatarPrefix(resolved.wedding.slug, player.id)}${uuid}.${MEDIA_TYPES[mimeType].extension}`;
+  const uploadUrl = await services.createPresignedPutUrl(originalKey);
+  const created = await env.DB.prepare(
+    `INSERT INTO media (
+       uuid, wedding_id, uploader_user_id, source, original_filename, original_key,
+       mime_type, size_bytes, status, preview_status
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'uploading', 'pending')
+     RETURNING id`,
+  ).bind(
+    uuid, resolved.wedding.id, resolved.user.id, FANTASPOSI_AVATAR_SOURCE,
+    filename, originalKey, mimeType, size,
+  ).first<{ id: number }>();
+  if (!created) throw new Error('Avatar media record was not created');
+
+  return json({ mediaId: created.id, uuid, uploadUrl, method: 'PUT' }, 201);
+}
+
+async function completePlayerAvatarResponse(
+  request: Request,
+  env: FantasposiEnv,
+  services: FantasposiMediaServices,
+  mediaId: number,
+): Promise<Response> {
+  const resolved = await context(request, env);
+  if (!resolved.ok) return resolved.response;
+  const player = await activePlayer(env, resolved.wedding.id, resolved.user.id);
+  if (!player?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  const media = await env.DB.prepare(
+    `SELECT id, wedding_id, uploader_user_id, source, original_key, mime_type,
+            size_bytes, status, preview_status, uploaded_at, thumbnail_key
+     FROM media WHERE id = ? AND wedding_id = ? LIMIT 1`,
+  ).bind(mediaId, resolved.wedding.id).first<AvatarMediaRow>();
+  if (!media || !isOwnedPlayerAvatarMedia({
+    weddingId: media.wedding_id,
+    uploaderUserId: media.uploader_user_id,
+    source: media.source,
+    originalKey: media.original_key,
+  }, {
+    weddingId: resolved.wedding.id,
+    userId: resolved.user.id,
+    weddingSlug: resolved.wedding.slug,
+    playerId: player.id,
+  }) || !isSupportedImageMimeType(media.mime_type)) {
+    return json({ error: 'Foto profilo non trovata.' }, 404);
+  }
+
+  const object = await env.MEDIA_BUCKET.head(media.original_key);
+  if (!object) return json({ error: 'La foto caricata non è stata trovata.' }, 409);
+  if (object.size !== media.size_bytes) return json({ error: 'La dimensione della foto non corrisponde.' }, 409);
+
+  if (media.status === 'uploading') {
+    const completed = await env.DB.prepare(
+      `UPDATE media
+       SET status = 'pending', uploaded_at = COALESCE(uploaded_at, CURRENT_TIMESTAMP)
+       WHERE id = ? AND wedding_id = ? AND uploader_user_id = ?
+         AND source = ? AND status = 'uploading'
+       RETURNING id, status`,
+    ).bind(media.id, resolved.wedding.id, resolved.user.id, FANTASPOSI_AVATAR_SOURCE)
+      .first<{ id: number; status: string }>();
+    if (!completed || completed.status !== 'pending') {
+      throw new Error(`Avatar media ${media.id} did not complete`);
+    }
+  } else if (media.status !== 'pending') {
+    return json({ error: 'La foto profilo non è aggiornabile.' }, 409);
+  }
+
+  const assigned = await env.DB.prepare(
+    `UPDATE fantasposi_players
+     SET avatar_media_id = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND wedding_id = ? AND user_id = ? AND active = true
+     RETURNING id, avatar_media_id`,
+  ).bind(media.id, player.id, resolved.wedding.id, resolved.user.id)
+    .first<{ id: number; avatar_media_id: number | null }>();
+  if (!assigned || assigned.avatar_media_id !== media.id) {
+    throw new Error(`Player ${player.id} did not receive avatar ${media.id}`);
+  }
+
+  if (media.preview_status !== 'ready') await services.enqueueMediaPreview(media.id);
+  return json({
+    mediaId: media.id,
+    previewStatus: media.preview_status,
+    avatarUrl: media.preview_status === 'ready' ? `/api/fantasposi/avatar/${media.id}` : null,
+  });
+}
+
+async function playerAvatarResponse(
+  request: Request,
+  env: FantasposiEnv,
+  mediaId: number,
+): Promise<Response> {
+  const resolved = await context(request, env);
+  if (!resolved.ok) return resolved.response;
+  const viewer = await activePlayer(env, resolved.wedding.id, resolved.user.id);
+  if (!viewer?.id) return json({ error: 'Active FantaSposi player required' }, 403);
+
+  const media = await env.DB.prepare(
+    `SELECT media.thumbnail_key
+     FROM media
+     INNER JOIN fantasposi_players player
+       ON player.avatar_media_id = media.id AND player.wedding_id = media.wedding_id
+     WHERE media.id = ? AND media.wedding_id = ? AND media.source = ?
+       AND media.preview_status = 'ready' AND player.active = true
+     LIMIT 1`,
+  ).bind(mediaId, resolved.wedding.id, FANTASPOSI_AVATAR_SOURCE)
+    .first<{ thumbnail_key: string | null }>();
+  if (!media?.thumbnail_key) return json({ error: 'Foto profilo non disponibile.' }, 404);
+  const object = await env.MEDIA_BUCKET.get(media.thumbnail_key);
+  if (!object) return json({ error: 'Foto profilo non disponibile.' }, 404);
+  return new Response(object.body, {
+    headers: {
+      'content-type': 'image/webp',
+      'content-length': String(object.size),
+      'cache-control': 'private, max-age=300',
+      ...(object.httpEtag ? { etag: object.httpEtag } : {}),
+    },
+  });
 }
 
 async function completePhotoMissionResponse(
@@ -1317,7 +1495,7 @@ async function onboardingResponse(request: Request, env: FantasposiEnv): Promise
        VALUES (?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (user_id) DO UPDATE
        SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
-       RETURNING user_id, display_name, avatar_url
+       RETURNING user_id, display_name
      ),
      player_upsert AS (
        INSERT INTO fantasposi_players (
@@ -1329,14 +1507,20 @@ async function onboardingResponse(request: Request, env: FantasposiEnv): Promise
            onboarding_completed = true,
            updated_at = CURRENT_TIMESTAMP
        WHERE fantasposi_players.active = true
-       RETURNING id, wedding_id, user_id, team, onboarding_completed, active, joined_at
+       RETURNING id, wedding_id, user_id, team, onboarding_completed, active, joined_at,
+                 avatar_media_id
      )
      SELECT player_upsert.id, player_upsert.wedding_id, player_upsert.user_id,
-            profile_upsert.display_name, profile_upsert.avatar_url,
+            profile_upsert.display_name, player_upsert.avatar_media_id,
+            avatar.preview_status AS avatar_preview_status,
             player_upsert.team, player_upsert.onboarding_completed,
             player_upsert.active, player_upsert.joined_at
      FROM player_upsert
-     INNER JOIN profile_upsert ON profile_upsert.user_id = player_upsert.user_id`,
+     INNER JOIN profile_upsert ON profile_upsert.user_id = player_upsert.user_id
+     LEFT JOIN media avatar
+       ON avatar.id = player_upsert.avatar_media_id
+      AND avatar.wedding_id = player_upsert.wedding_id
+      AND avatar.source = 'fantasposi_avatar'`,
   ).bind(
     resolved.user.id,
     displayName,
@@ -1376,6 +1560,25 @@ export async function handleFantasposiRequest(
     }
     if (request.method === 'GET' && url.pathname === '/api/fantasposi/predictions') {
       return predictionsResponse(request, env);
+    }
+    if (request.method === 'POST' && url.pathname === '/api/fantasposi/avatar/create') {
+      return createPlayerAvatarResponse(request, env, mediaServices);
+    }
+    const completeAvatar = url.pathname.match(/^\/api\/fantasposi\/avatar\/(\d+)\/complete$/);
+    if (request.method === 'POST' && completeAvatar) {
+      const mediaId = Number(completeAvatar[1]);
+      if (!Number.isSafeInteger(mediaId) || mediaId <= 0) {
+        return json({ error: 'Invalid avatar media ID' }, 400);
+      }
+      return completePlayerAvatarResponse(request, env, mediaServices, mediaId);
+    }
+    const viewAvatar = url.pathname.match(/^\/api\/fantasposi\/avatar\/(\d+)$/);
+    if (request.method === 'GET' && viewAvatar) {
+      const mediaId = Number(viewAvatar[1]);
+      if (!Number.isSafeInteger(mediaId) || mediaId <= 0) {
+        return json({ error: 'Invalid avatar media ID' }, 400);
+      }
+      return playerAvatarResponse(request, env, mediaId);
     }
     const createPhotoProof = url.pathname.match(/^\/api\/fantasposi\/missions\/(\d+)\/proof\/create$/);
     if (request.method === 'POST' && createPhotoProof) {
