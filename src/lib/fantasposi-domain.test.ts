@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveMissionStatus,
+  fantasposiTeamLabel,
   fantasposiMutationBlock,
   formatFantasposiCountdown,
   isValidFantasposiResetConfirmation,
@@ -38,6 +39,12 @@ const mission = (overrides: Partial<RecommendedMissionCandidate> = {}): Recommen
 });
 
 describe('game lifecycle', () => {
+  it('creates one complete team label without duplicating its prefix', () => {
+    expect(fantasposiTeamLabel('Serena')).toBe('Team Serena');
+    expect(fantasposiTeamLabel('Team Enrico')).toBe('Team Enrico');
+    expect(fantasposiTeamLabel(fantasposiTeamLabel('Test Sposa'))).toBe('Team Test Sposa');
+  });
+
   it('allows scoring mutations only while active', () => {
     expect(fantasposiMutationBlock('active')).toBeNull();
     expect(fantasposiMutationBlock('setup')).toMatchObject({ code: 'game_not_active', status: 409 });

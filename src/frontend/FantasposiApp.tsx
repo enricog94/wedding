@@ -756,7 +756,7 @@ function FantasyLeaderboard({ refreshKey }: { refreshKey: number }) {
       <div className="fantasposi-team-score" aria-label="Punteggio squadre">
         {(['bride', 'groom'] as const).map((team) => (
           <article key={team}>
-            <span>Team {data.teams[team].name}</span>
+            <span>{data.teams[team].name}</span>
             <strong>{data.teams[team].points}</strong>
             <small>{data.teams[team].players} {data.teams[team].players === 1 ? 'giocatore' : 'giocatori'}</small>
           </article>
@@ -787,7 +787,7 @@ function FantasyLeaderboard({ refreshKey }: { refreshKey: number }) {
               <PlayerAvatar name={player.displayName} source={player.avatarUrl} />
               <div>
                 <strong>{player.displayName}{player.isCurrentUser ? ' · Tu' : ''}</strong>
-                <small>Team {data.teams[player.team].name} · {player.completedMissions} {player.completedMissions === 1 ? 'missione' : 'missioni'}</small>
+                <small>{data.teams[player.team].name} · {player.completedMissions} {player.completedMissions === 1 ? 'missione' : 'missioni'}</small>
               </div>
               <b>{player.points} <small>pt</small></b>
             </li>
@@ -949,14 +949,14 @@ function FantasyFinalResults({ refreshKey }: { refreshKey: number }) {
   const groomPoints = data.teams.groom.points;
   const winner = bridePoints === groomPoints
     ? 'Pareggio tra i due team'
-    : `Vince il Team ${bridePoints > groomPoints ? data.teams.bride.name : data.teams.groom.name}`;
+    : `Vince ${bridePoints > groomPoints ? data.teams.bride.name : data.teams.groom.name}`;
   return <section className="fantasposi-final">
     <p className="fantasposi-kicker">Risultati finali</p>
     <h1>FantaSposi concluso</h1>
     <p className="fantasposi-final__winner">{winner}</p>
-    {data.currentPlayer && <div className="fantasposi-final__personal"><span>La tua posizione</span><strong>{data.currentPlayer.rank}°</strong><span>{data.currentPlayer.points} punti · Team {data.teams[data.currentPlayer.team].name}</span></div>}
+    {data.currentPlayer && <div className="fantasposi-final__personal"><span>La tua posizione</span><strong>{data.currentPlayer.rank}°</strong><span>{data.currentPlayer.points} punti · {data.teams[data.currentPlayer.team].name}</span></div>}
     <div className="fantasposi-team-score" aria-label="Punteggio finale squadre">
-      {(['bride', 'groom'] as const).map((team) => <article key={team}><span>Team {data.teams[team].name}</span><strong>{data.teams[team].points}</strong></article>)}
+      {(['bride', 'groom'] as const).map((team) => <article key={team}><span>{data.teams[team].name}</span><strong>{data.teams[team].points}</strong></article>)}
       <span className="fantasposi-team-score__versus" aria-hidden="true">VS</span>
     </div>
     {data.players.length >= 3 && <div className="fantasposi-final__podium"><h2>Podio</h2><ol>{data.players.slice(0, 3).map((player) => <li key={player.playerId}><span>{player.rank}</span><PlayerAvatar name={player.displayName} source={player.avatarUrl} eager /><strong>{player.displayName}</strong><b>{player.points} pt</b></li>)}</ol></div>}
@@ -1078,7 +1078,7 @@ function FantasyProfile({
       </label>
     </div>
     <h1>{displayName}</h1>
-    <TeamBadge team={game.player.team}>Team {teamName}</TeamBadge>
+    <TeamBadge team={game.player.team}>{teamName}</TeamBadge>
     <div className="fantasposi-profile__stats">
       <div><strong>{game.totalPoints}</strong><span>Punti</span></div>
       <div><strong>{rank ? `${rank}°` : '—'}</strong><span>Posizione</span></div>
@@ -1117,7 +1117,7 @@ function FantasyHome({
       <PlayerAvatar name={displayName} source={game.player.avatarUrl} eager className="is-hero" />
       <div className="fantasposi-player-hero__copy">
         <span>Ciao,</span><h1>{displayName}</h1>
-        <TeamBadge team={game.player.team}>Team {teamName}</TeamBadge>
+        <TeamBadge team={game.player.team}>{teamName}</TeamBadge>
       </div>
       <div className="fantasposi-player-hero__phase"><span>Ora</span><strong>{game.currentPhase?.name ?? 'In preparazione'}</strong></div>
     </section>
@@ -1269,7 +1269,7 @@ function FantasyShell({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; o
     content = game.gameState === 'finished'
       ? <FantasyFinalResults refreshKey={leaderboardRefreshKey} />
       : game.gameState === 'setup'
-        ? <section className="fantasposi-setup"><PlayerAvatar name={displayName} source={game.player.avatarUrl} eager className="is-hero" /><p className="fantasposi-kicker">Tutto pronto, {displayName}</p><h1>Il FantaSposi sta per iniziare</h1><TeamBadge team={game.player.team}>Team {teamName}</TeamBadge><p>Il tuo profilo è pronto. Torna qui quando gli sposi daranno il via al gioco.</p></section>
+        ? <section className="fantasposi-setup"><PlayerAvatar name={displayName} source={game.player.avatarUrl} eager className="is-hero" /><p className="fantasposi-kicker">Tutto pronto, {displayName}</p><h1>Il FantaSposi sta per iniziare</h1><TeamBadge team={game.player.team}>{teamName}</TeamBadge><p>Il tuo profilo è pronto. Torna qui quando gli sposi daranno il via al gioco.</p></section>
         : <FantasyHome game={game} rank={currentRank} missions={homeMissions} now={homeNow} navigate={navigate} />;
   }
 

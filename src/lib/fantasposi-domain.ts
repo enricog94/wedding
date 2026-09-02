@@ -15,6 +15,11 @@ export type EffectivePredictionStatus = 'scheduled' | 'open' | 'closed' | 'resol
 
 export type FantasposiGameState = 'setup' | 'active' | 'finished';
 
+export function fantasposiTeamLabel(name: string): string {
+  const normalized = name.trim();
+  return /^team\s+/i.test(normalized) ? normalized : `Team ${normalized}`;
+}
+
 export type FantasposiMutationBlock = {
   status: 409;
   code: 'game_not_active' | 'game_finished';

@@ -2,6 +2,7 @@ import type { Database } from '../lib/supabase-db';
 import type { WeddingResolution } from '../lib/wedding-resolver';
 import {
   fantasposiMutationBlock,
+  fantasposiTeamLabel,
   isOwnedPlayerAvatarMedia,
   isPhotoProofOriginalKey,
   missionRequiresPhotoProof,
@@ -237,16 +238,14 @@ async function playerForUser(
   userId: string,
 ): Promise<PlayerRow | null> {
   return env.DB.prepare(
-    `SELECT fp.id, fp.wedding_id, p.user_id, p.display_name,
+    `SELECT fp.id, fp.wedding_id, fp.user_id, fp.display_name,
             fp.avatar_media_id, avatar.preview_status AS avatar_preview_status,
             fp.team, fp.onboarding_completed, fp.active, fp.joined_at
-     FROM profiles p
-     LEFT JOIN fantasposi_players fp
-       ON fp.user_id = p.user_id AND fp.wedding_id = ?
+     FROM fantasposi_players fp
      LEFT JOIN media avatar
        ON avatar.id = fp.avatar_media_id AND avatar.wedding_id = fp.wedding_id
       AND avatar.source = 'fantasposi_avatar'
-     WHERE p.user_id = ?
+     WHERE fp.wedding_id = ? AND fp.user_id = ?
      LIMIT 1`,
   ).bind(weddingId, userId).first<PlayerRow>();
 }
@@ -265,8 +264,8 @@ function serializeWedding(wedding: WeddingRow) {
     groomName: wedding.groom_name,
     weddingDate: wedding.wedding_date,
     teams: {
-      bride: `Team ${wedding.bride_name}`,
-      groom: `Team ${wedding.groom_name}`,
+      bride: fantasposiTeamLabel(wedding.bride_name),
+      groom: fantasposiTeamLabel(wedding.groom_name),
     },
   };
 }
@@ -276,7 +275,7 @@ function serializePlayer(player: PlayerRow | null) {
   return {
     id: player.id,
     userId: player.user_id,
-    displayName: player.display_name,
+    displayName: player.display_name?.trim() || 'Giocatore',
     avatarMediaId: player.avatar_media_id,
     avatarUrl: playerAvatarUrl(player),
     team: player.team,
@@ -592,7 +591,7 @@ async function meResponse(request: Request, env: FantasposiEnv): Promise<Respons
     user: {
       id: resolved.user.id,
       email: resolved.user.email,
-      displayName: player?.display_name ?? null,
+      displayName: serializedPlayer?.displayName ?? null,
       avatarUrl: player ? playerAvatarUrl(player) : null,
     },
     wedding: serializeWedding(resolved.wedding),
@@ -745,7 +744,7 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
        FROM fantasposi_player_predictions WHERE wedding_id = ? GROUP BY player_id
      ), player_totals AS (
        SELECT player.id AS player_id,
-              COALESCE(NULLIF(BTRIM(profile.display_name), ''), 'Giocatore') AS display_name,
+              COALESCE(NULLIF(BTRIM(player.display_name), ''), 'Giocatore') AS display_name,
               player.team, player.avatar_media_id,
               avatar.preview_status AS avatar_preview_status,
               COALESCE(mission.points, 0)::integer AS mission_points,
@@ -753,7 +752,6 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
               (COALESCE(mission.points, 0) + COALESCE(prediction.points, 0))::integer AS points,
               COALESCE(mission.completed_missions, 0)::integer AS completed_missions
        FROM fantasposi_players player
-       LEFT JOIN profiles profile ON profile.user_id = player.user_id
        LEFT JOIN media avatar
          ON avatar.id = player.avatar_media_id AND avatar.wedding_id = player.wedding_id
         AND avatar.source = 'fantasposi_avatar'
@@ -791,12 +789,12 @@ async function leaderboardResponse(request: Request, env: FantasposiEnv): Promis
   return json({
     teams: {
       bride: {
-        name: resolved.wedding.bride_name,
+        name: fantasposiTeamLabel(resolved.wedding.bride_name),
         points: brideTeam?.team_points ?? 0,
         players: brideTeam?.team_players ?? 0,
       },
       groom: {
-        name: resolved.wedding.groom_name,
+        name: fantasposiTeamLabel(resolved.wedding.groom_name),
         points: groomTeam?.team_points ?? 0,
         players: groomTeam?.team_players ?? 0,
       },
@@ -1490,42 +1488,35 @@ async function onboardingResponse(request: Request, env: FantasposiEnv): Promise
   }
 
   const result = await env.DB.prepare(
-    `WITH profile_upsert AS (
-       INSERT INTO profiles (user_id, display_name, updated_at)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id) DO UPDATE
-       SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
-       RETURNING user_id, display_name
-     ),
-     player_upsert AS (
+    `WITH player_upsert AS (
        INSERT INTO fantasposi_players (
-         wedding_id, user_id, team, onboarding_completed, active, joined_at, updated_at
+         wedding_id, user_id, display_name, team,
+         onboarding_completed, active, joined_at, updated_at
        )
-       VALUES (?, ?, ?, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       VALUES (?, ?, ?, ?, true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
        ON CONFLICT (wedding_id, user_id) DO UPDATE
-       SET team = EXCLUDED.team,
+       SET display_name = EXCLUDED.display_name,
+           team = EXCLUDED.team,
            onboarding_completed = true,
            updated_at = CURRENT_TIMESTAMP
        WHERE fantasposi_players.active = true
-       RETURNING id, wedding_id, user_id, team, onboarding_completed, active, joined_at,
-                 avatar_media_id
+       RETURNING id, wedding_id, user_id, display_name, team,
+                 onboarding_completed, active, joined_at, avatar_media_id
      )
      SELECT player_upsert.id, player_upsert.wedding_id, player_upsert.user_id,
-            profile_upsert.display_name, player_upsert.avatar_media_id,
+            player_upsert.display_name, player_upsert.avatar_media_id,
             avatar.preview_status AS avatar_preview_status,
             player_upsert.team, player_upsert.onboarding_completed,
             player_upsert.active, player_upsert.joined_at
      FROM player_upsert
-     INNER JOIN profile_upsert ON profile_upsert.user_id = player_upsert.user_id
      LEFT JOIN media avatar
        ON avatar.id = player_upsert.avatar_media_id
       AND avatar.wedding_id = player_upsert.wedding_id
       AND avatar.source = 'fantasposi_avatar'`,
   ).bind(
-    resolved.user.id,
-    displayName,
     resolved.wedding.id,
     resolved.user.id,
+    displayName,
     team,
   ).first<PlayerRow>();
 
