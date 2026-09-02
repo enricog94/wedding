@@ -1,8 +1,9 @@
 import type { Database } from '../lib/supabase-db';
+import type { WeddingResolution } from '../lib/wedding-resolver';
 
 export type ContentEnv = {
   DB: Database;
-  CURRENT_WEDDING_SLUG: string;
+  WEDDING_CONTEXT?: Promise<WeddingResolution>;
 };
 
 type ContentWeddingRow = {
@@ -368,8 +369,8 @@ function serializeInfo(row: InfoRow, admin = false) {
 }
 
 async function findCurrentWedding(env: ContentEnv): Promise<ContentWeddingRow | null> {
-  const slug = env.CURRENT_WEDDING_SLUG?.trim();
-  if (!slug) return null;
+  const resolution = await env.WEDDING_CONTEXT;
+  if (!resolution?.resolved) return null;
   return env.DB.prepare(
     `SELECT w.id, w.slug, w.bride_name, w.groom_name, w.wedding_date, w.status, w.theme,
             w.hero_eyebrow, w.hero_title, w.hero_subtitle,
@@ -378,19 +379,16 @@ async function findCurrentWedding(env: ContentEnv): Promise<ContentWeddingRow | 
      LEFT JOIN wedding_home_content h ON h.wedding_id = w.id
      LEFT JOIN site_assets a
        ON a.id = h.hero_site_asset_id AND a.wedding_id = w.id
-     WHERE w.slug = ?
+     WHERE w.id = ?
      LIMIT 1`,
   )
-    .bind(slug)
+    .bind(resolution.wedding.id)
     .first<ContentWeddingRow>();
 }
 
 async function currentWeddingResponse(env: ContentEnv): Promise<
   { wedding: ContentWeddingRow } | { response: Response }
 > {
-  if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-    return { response: json({ error: 'Current wedding is not configured' }, 500) };
-  }
   const wedding = await findCurrentWedding(env);
   return wedding
     ? { wedding }

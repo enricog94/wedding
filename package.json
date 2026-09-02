@@ -17,6 +17,7 @@
     "fantasposi:seed:phases": "node scripts/seed-fantasposi-phases.mjs",
     "fantasposi:seed:demo": "node scripts/seed-fantasposi-demo-missions.mjs",
     "fantasposi:seed:predictions": "node scripts/seed-fantasposi-demo-predictions.mjs",
+    "wedding:test:create": "node scripts/create-test-wedding.mjs",
     "supabase:db:push": "npx supabase db push",
     "deploy": "npm run build && wrangler deploy --no-x-provision"
   },

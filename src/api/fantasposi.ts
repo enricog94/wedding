@@ -1,4 +1,5 @@
 import type { Database } from '../lib/supabase-db';
+import type { WeddingResolution } from '../lib/wedding-resolver';
 import {
   fantasposiMutationBlock,
   isPhotoProofOriginalKey,
@@ -18,10 +19,10 @@ import {
 
 type FantasposiEnv = {
   DB: Database;
-  CURRENT_WEDDING_SLUG: string;
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   MEDIA_BUCKET: R2Bucket;
+  WEDDING_CONTEXT?: Promise<WeddingResolution>;
 };
 
 type FantasposiMediaServices = {
@@ -210,14 +211,8 @@ async function authenticate(request: Request, env: FantasposiEnv): Promise<AuthR
 }
 
 async function currentWedding(env: FantasposiEnv): Promise<WeddingRow | null> {
-  const slug = env.CURRENT_WEDDING_SLUG?.trim();
-  if (!slug) throw new Error('CURRENT_WEDDING_SLUG is not configured');
-  return env.DB.prepare(
-    `SELECT id, slug, bride_name, groom_name, wedding_date, fantasposi_status
-     FROM weddings
-     WHERE slug = ?
-     LIMIT 1`,
-  ).bind(slug).first<WeddingRow>();
+  const resolution = await env.WEDDING_CONTEXT;
+  return resolution?.resolved ? resolution.wedding : null;
 }
 
 function gameMutationResponse(wedding: WeddingRow): Response | null {

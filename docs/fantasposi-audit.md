@@ -91,7 +91,7 @@ Rischi applicazione:
 
 ### Player
 
-`Bearer JWT -> Supabase /auth/v1/user -> CURRENT_WEDDING_SLUG -> weddings -> profiles/fantasposi_players(user_id, wedding_id)`.
+`Bearer JWT -> Supabase /auth/v1/user -> request hostname -> wedding_domains/weddings -> profiles/fantasposi_players(user_id, wedding_id)`.
 
 - JWT valido non equivale a player: bootstrap, missioni e completion richiedono membership, onboarding completo e player attivo.
 - Il client non invia `wedding_id`, `user_id`, `player_id` o punti.
@@ -100,7 +100,7 @@ Rischi applicazione:
 
 ### Admin
 
-`Bearer JWT -> Supabase /auth/v1/user -> CURRENT_WEDDING_SLUG -> system_role=super_admin OR wedding_members.role=wedding_admin -> handler FantaSposi admin`.
+`Bearer JWT -> Supabase /auth/v1/user -> request hostname -> wedding_domains/weddings -> system_role=super_admin OR wedding_members.role=wedding_admin -> handler FantaSposi admin`.
 
 - Le route `/api/admin/fantasposi/*` vengono raggiunte solo dopo `requireAdmin()`.
 - Un player non diventa admin.
@@ -270,4 +270,3 @@ GROUP BY w.slug;
 ```
 
 Atteso: tre migration presenti; nessuna riga dalla query delle fasi multiple; sei fasi dopo il seed. Se si esegue il seed demo, il log deve indicare 6 missioni.
-

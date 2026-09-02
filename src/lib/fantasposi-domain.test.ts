@@ -197,7 +197,12 @@ describe('Photo Proof validation', () => {
 
   it('keeps proof purpose, wedding and mission in the object prefix', () => {
     const prefix = photoProofPrefix('serena-enrico-2027', 'foto-team');
+    const testWeddingPrefix = photoProofPrefix('test-wedding', 'foto-team');
     expect(prefix).toBe('weddings/serena-enrico-2027/fantasposi/proofs/foto-team/originals/');
+    expect(testWeddingPrefix).toBe('weddings/test-wedding/fantasposi/proofs/foto-team/originals/');
+    expect(prefix).not.toBe(testWeddingPrefix);
+    expect(prefix.startsWith('weddings/test-wedding/')).toBe(false);
+    expect(testWeddingPrefix.startsWith('weddings/serena-enrico-2027/')).toBe(false);
     expect(isPhotoProofOriginalKey(`${prefix}uuid.jpg`, 'serena-enrico-2027', 'foto-team')).toBe(true);
     expect(isPhotoProofOriginalKey(`${prefix}uuid.jpg`, 'altro-wedding', 'foto-team')).toBe(false);
     expect(isPhotoProofOriginalKey(`${prefix}uuid.jpg`, 'serena-enrico-2027', 'altra-missione')).toBe(false);

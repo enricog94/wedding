@@ -1,4 +1,5 @@
 import type { Database } from '../lib/supabase-db';
+import type { WeddingResolution } from '../lib/wedding-resolver';
 import {
   isValidTimeWindow,
   isValidFantasposiResetConfirmation,
@@ -8,7 +9,7 @@ import {
 
 type AdminFantasyEnv = {
   DB: Database;
-  CURRENT_WEDDING_SLUG: string;
+  WEDDING_CONTEXT?: Promise<WeddingResolution>;
 };
 
 type WeddingRow = { id: number; slug: string; fantasposi_status: FantasposiGameState };
@@ -67,11 +68,8 @@ function json(data: unknown, status = 200): Response {
 }
 
 async function currentWedding(env: AdminFantasyEnv): Promise<WeddingRow | null> {
-  const slug = env.CURRENT_WEDDING_SLUG?.trim();
-  if (!slug) throw new Error('CURRENT_WEDDING_SLUG is not configured');
-  return env.DB.prepare('SELECT id, slug, fantasposi_status FROM weddings WHERE slug = ? LIMIT 1')
-    .bind(slug)
-    .first<WeddingRow>();
+  const resolution = await env.WEDDING_CONTEXT;
+  return resolution?.resolved ? resolution.wedding : null;
 }
 
 function serializePhase(phase: AdminPhaseRow) {

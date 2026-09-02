@@ -34,7 +34,8 @@ Le foreign key composite `(entity_id, wedding_id)` impediscono di collegare play
 3. La sessione viene persistita e aggiornata usando il refresh token esistente.
 4. Il frontend invia il bearer token alle API `/api/fantasposi/*`.
 5. Il Worker verifica il token tramite Supabase Auth.
-6. Il Worker risolve il wedding esclusivamente tramite `CURRENT_WEDDING_SLUG`.
+6. Il Worker risolve il wedding dall'hostname tramite `wedding_domains`; usa
+   `CURRENT_WEDDING_SLUG` soltanto come fallback per localhost e `*.workers.dev`.
 7. Il Worker cerca `fantasposi_players` usando insieme `wedding_id` e `user_id`.
 
 L’autenticazione non implica né membership FantaSposi né ruolo admin.
@@ -104,7 +105,7 @@ Una missione è mostrata al giocatore quando appartiene al wedding corrente, è 
 ### Completion flow
 
 1. Il Worker verifica il JWT Supabase.
-2. Risolve il wedding da `CURRENT_WEDDING_SLUG`.
+2. Riusa il wedding risolto server-side dall'hostname della request.
 3. Risolve il player attivo usando `user_id` e `wedding_id`.
 4. Verifica missione, fase attiva e tipo manuale.
 5. Inserisce o aggiorna idempotentemente `fantasposi_player_missions`.

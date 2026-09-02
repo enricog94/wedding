@@ -3,6 +3,11 @@ import { handleFantasposiRequest } from './fantasposi';
 import { handleAdminFantasposiRequest } from './fantasposi-admin';
 import { createPostgresDatabase, type Database } from '../lib/supabase-db';
 import {
+  getWeddingResolution,
+  type ResolvedWedding,
+  type WeddingResolution,
+} from '../lib/wedding-resolver';
+import {
   FANTASPOSI_PROOF_SOURCE,
   MEDIA_TYPES,
   type SupportedMimeType,
@@ -13,7 +18,7 @@ export interface WorkerEnv {
   IMAGES: ImagesBinding;
   MEDIA_PROCESSING_QUEUE: Queue<MediaProcessingMessage>;
   ASSETS: Fetcher;
-  CURRENT_WEDDING_SLUG: string;
+  CURRENT_WEDDING_SLUG?: string;
   R2_ACCOUNT_ID: string;
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
@@ -23,7 +28,7 @@ export interface WorkerEnv {
   SUPABASE_DATABASE_URL?: string;
 }
 
-export type Env = WorkerEnv & { DB: Database };
+export type Env = WorkerEnv & { DB: Database; WEDDING_CONTEXT?: Promise<WeddingResolution> };
 
 function withDatabase(env: WorkerEnv): Env {
   return {
@@ -142,7 +147,11 @@ type AdminAuthorization =
   | { authorized: true; identity: AdminIdentity }
   | { authorized: false; response: Response };
 
-async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorization> {
+async function requireAdmin(
+  request: Request,
+  env: Env,
+  wedding: ResolvedWedding,
+): Promise<AdminAuthorization> {
   const authorization = request.headers.get('authorization')?.trim() ?? '';
   const token = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
@@ -156,8 +165,7 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorizat
 
   const supabaseUrl = env.SUPABASE_URL?.trim().replace(/\/$/, '');
   const anonKey = env.SUPABASE_ANON_KEY?.trim();
-  const weddingSlug = env.CURRENT_WEDDING_SLUG?.trim();
-  if (!supabaseUrl || !anonKey || !weddingSlug) {
+  if (!supabaseUrl || !anonKey) {
     console.error('Supabase admin authentication is not configured');
     return {
       authorized: false,
@@ -182,9 +190,9 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorizat
        FROM weddings w
        LEFT JOIN profiles p ON p.user_id = ?
        LEFT JOIN wedding_members wm ON wm.wedding_id = w.id AND wm.user_id = ?
-       WHERE w.slug = ?
+       WHERE w.id = ?
        LIMIT 1`,
-    ).bind(user.id, user.id, weddingSlug).first<{ system_role: string | null; wedding_role: string | null }>();
+    ).bind(user.id, user.id, wedding.id).first<{ system_role: string | null; wedding_role: string | null }>();
     if (role?.system_role !== 'super_admin' && role?.wedding_role !== 'wedding_admin') {
       return { authorized: false, response: json({ error: 'Admin role required' }, 403) };
     }
@@ -203,14 +211,7 @@ async function requireAdmin(request: Request, env: Env): Promise<AdminAuthorizat
   }
 }
 
-type WeddingRow = {
-  id: number;
-  slug: string;
-  bride_name: string;
-  groom_name: string;
-  wedding_date: string;
-  status: string;
-};
+type WeddingRow = ResolvedWedding;
 
 type WeddingSettingsRow = {
   wedding_id: number;
@@ -311,7 +312,8 @@ function serializeWedding(row: WeddingRow) {
 
 async function findWeddingBySlug(env: Env, slug: string): Promise<WeddingRow | null> {
   return env.DB.prepare(
-    `SELECT id, slug, bride_name, groom_name, wedding_date, status
+    `SELECT id, slug, bride_name, groom_name, wedding_date, status, theme,
+            hero_eyebrow, hero_title, hero_subtitle, fantasposi_status
      FROM weddings
      WHERE slug = ?
      LIMIT 1`,
@@ -321,8 +323,8 @@ async function findWeddingBySlug(env: Env, slug: string): Promise<WeddingRow | n
 }
 
 async function findCurrentWedding(env: Env): Promise<WeddingRow | null> {
-  const slug = env.CURRENT_WEDDING_SLUG?.trim();
-  return slug ? findWeddingBySlug(env, slug) : null;
+  const resolution = await env.WEDDING_CONTEXT;
+  return resolution?.resolved ? resolution.wedding : null;
 }
 
 const DEFAULT_WEDDING_SETTINGS: WeddingSettings = {
@@ -1074,6 +1076,21 @@ export default {
       return json({ supabaseUrl, anonKey });
     }
 
+    let weddingResolution: WeddingResolution;
+    try {
+      weddingResolution = await getWeddingResolution(request, env);
+    } catch (error) {
+      console.error('Wedding resolution failed', { hostname: url.hostname, error });
+      return json({ error: 'Wedding resolution unavailable' }, 500);
+    }
+    if (!weddingResolution.resolved) {
+      return json({
+        error: 'Wedding not configured for this hostname',
+        code: 'wedding_not_configured',
+      }, 404);
+    }
+    const resolvedWedding = weddingResolution.wedding;
+
     const fantasposiResponse = await handleFantasposiRequest(request, env, {
       createPresignedPutUrl: (objectKey) => createPresignedPutUrl(env, objectKey),
       enqueueMediaPreview: (mediaId) => enqueueMediaPreview(env, mediaId),
@@ -1081,7 +1098,7 @@ export default {
     if (fantasposiResponse) return fantasposiResponse;
 
     const adminAuthorization = url.pathname.startsWith('/api/admin/')
-      ? await requireAdmin(request, env)
+      ? await requireAdmin(request, env, resolvedWedding)
       : null;
     if (adminAuthorization && !adminAuthorization.authorized) {
       return adminAuthorization.response;
@@ -1117,19 +1134,8 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/wedding/current') {
-      const currentWeddingSlug = env.CURRENT_WEDDING_SLUG?.trim();
-      if (!currentWeddingSlug) {
-        return json({ error: 'Current wedding is not configured' }, 500);
-      }
-
       try {
-        const wedding = await findWeddingBySlug(env, currentWeddingSlug);
-
-        if (!wedding) {
-          return json({ error: 'Configured wedding not found' }, 404);
-        }
-
-        return json(serializeWedding(wedding));
+        return json(serializeWedding(resolvedWedding));
       } catch (error) {
         console.error('Unable to read active wedding', error);
         return json({ error: 'Wedding unavailable' }, 500);
@@ -1139,9 +1145,6 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/wedding/settings') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         const settings = await getWeddingSettings(env, wedding.id);
         return json({
@@ -1159,9 +1162,6 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/admin/settings') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         return json(await getWeddingSettings(env, wedding.id));
       } catch (error) {
@@ -1173,9 +1173,6 @@ export default {
     if (request.method === 'PUT' && url.pathname === '/api/admin/settings') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
 
         const settings = parseBooleanSettings(await request.json());
@@ -1239,9 +1236,6 @@ export default {
       }
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         const result = assetType
           ? await env.DB.prepare(
@@ -1264,9 +1258,6 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/admin/site-assets/create') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         const body: unknown = await request.json();
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -1406,9 +1397,6 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/admin/media/pending') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1444,9 +1432,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
 
         const conditions = ['wedding_id = ?', 'source <> ?'];
@@ -1541,9 +1526,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1593,9 +1575,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1631,9 +1610,6 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/admin/media/bulk') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
 
         const body: unknown = await request.json();
@@ -1709,9 +1685,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         if (!await deleteOwnedMedia(env, wedding, mediaId)) {
           return json({ error: 'Media not found' }, 404);
@@ -1726,9 +1699,6 @@ export default {
     if (request.method === 'DELETE' && url.pathname === '/api/admin/media') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
 
         const body: unknown = await request.json();
@@ -1766,9 +1736,6 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/media/create') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1857,9 +1824,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1958,9 +1922,6 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/media') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -1987,9 +1948,6 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/gallery') {
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -2043,9 +2001,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Configured wedding not found' }, 404);
         if (!(await getWeddingSettings(env, wedding.id)).galleryEnabled) {
           return json({ error: 'Preview not found' }, 404);
@@ -2077,9 +2032,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) {
           return json({ error: 'Configured wedding not found' }, 404);
         }
@@ -2130,9 +2082,6 @@ export default {
 
       try {
         const wedding = await findCurrentWedding(env);
-        if (!env.CURRENT_WEDDING_SLUG?.trim()) {
-          return json({ error: 'Current wedding is not configured' }, 500);
-        }
         if (!wedding) return json({ error: 'Media not found' }, 404);
 
         const settings = await getWeddingSettings(env, wedding.id);
